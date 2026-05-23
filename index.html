@@ -1,0 +1,1608 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Pokémon Silk</title>
+  <meta name="description" content="A visual to-do list where tasks become spider Pokémon crawling toward the center of a glowing web."/>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box;}
+    html,body,#root{width:100%;height:100%;overflow:hidden;background:#05021a;}
+    body{-webkit-font-smoothing:antialiased;}
+    input[type="date"]::-webkit-calendar-picker-indicator,
+    input[type="time"]::-webkit-calendar-picker-indicator{filter:invert(0.7);}
+    select option{background:#0d0b28;color:#d2cef8;}
+    textarea{font-family:monospace;}
+    ::-webkit-scrollbar{width:4px;}
+    ::-webkit-scrollbar-track{background:rgba(0,0,0,0);}
+    ::-webkit-scrollbar-thumb{background:rgba(112,102,178,0.35);border-radius:2px;}
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <!-- React + ReactDOM + Babel for in-browser JSX compilation -->
+  <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+
+  <script type="text/babel" data-presets="react">
+    // Destructure hooks from React global (replaces the import statement)
+    const { useState, useEffect, useRef, useCallback, useMemo } = React;
+
+// ─── localStorage loader (module-level, runs once per key) ───────────────────
+function loadStored(key, parse){
+  try{ const s=localStorage.getItem(key); if(s) return parse(JSON.parse(s)); }catch{}
+  return null;
+}
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+const SEVEN_DAYS = 7 * 24 * 60 * 60 * 1000;
+const ONE_DAY    = 24 * 60 * 60 * 1000;
+const THIRTY_D   = 30 * ONE_DAY;
+const NINETY_D   = 90 * ONE_DAY;
+const Z1=0.30, Z2=0.60, Z3=0.85, Z4=1.00;
+
+const SPECIES = {
+  spinarak:{ label:"Spinarak", id:167 },
+  joltik:  { label:"Joltik",   id:595 },
+  dewpider:{ label:"Dewpider", id:751 },
+};
+const BOSS_SPECIES = {
+  ariados:   { label:"Ariados",    id:168, preEvo:"spinarak" },
+  galvantula:{ label:"Galvantula", id:596, preEvo:"joltik"   },
+  araquanid: { label:"Araquanid",  id:752, preEvo:"dewpider"  },
+};
+
+// Species colour palette — used for label pills and canvas tints
+const SPECIES_COLOR = {
+  spinarak:  { pill:"rgba(60,120,30,0.22)",  border:"rgba(90,170,50,0.38)",  text:"#a8d868" },
+  joltik:    { pill:"rgba(120,100,10,0.22)", border:"rgba(210,175,30,0.40)", text:"#e8c840" },
+  dewpider:  { pill:"rgba(20,90,110,0.22)",  border:"rgba(50,160,190,0.38)", text:"#78cce0" },
+};
+// Boss species inherits pre-evo colour (BOSS_SPECIES is declared above, safe)
+function speciesColor(type){
+  const base = SPECIES_COLOR[type] ?? SPECIES_COLOR[BOSS_SPECIES[type]?.preEvo] ?? null;
+  return base ?? { pill:"rgba(40,30,80,0.22)", border:"rgba(130,120,200,0.30)", text:"#c0b8f0" };
+}
+// Boss display label with evo note
+function bossLabel(key){ const b=BOSS_SPECIES[key]; return b?`${b.label} (${b.preEvo} evo)`:key; }
+
+const FREQ_OPTIONS = [
+  { value:"daily",    label:"Daily",        ms: ONE_DAY },
+  { value:"every2",   label:"Every 2 days", ms: 2*ONE_DAY },
+  { value:"weekly",   label:"Weekly",       ms: 7*ONE_DAY },
+  { value:"biweekly", label:"Bi-weekly",    ms: 14*ONE_DAY },
+  { value:"monthly",  label:"Monthly",      ms: 30*ONE_DAY },
+];
+function freqMs(v){ return FREQ_OPTIONS.find(f=>f.value===v)?.ms ?? ONE_DAY; }
+function spriteUrls(name){
+  const ids={spinarak:167,joltik:595,dewpider:751,ariados:168,galvantula:596,araquanid:752};
+  return [
+    `https://play.pokemonshowdown.com/sprites/ani/${name}.gif`,
+    `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/${ids[name]||0}.png`,
+  ];
+}
+
+// ─── Radius (4-zone piecewise) ────────────────────────────────────────────────
+function getRadius(deadline, now, maxR){
+  const ms=deadline-now; if(ms<=0) return 0;
+  let frac;
+  if     (ms<=ONE_DAY)    frac = Z1 * Math.pow(ms/ONE_DAY, 0.35);
+  else if(ms<=SEVEN_DAYS) frac = Z1 + (Z2-Z1)*Math.pow((ms-ONE_DAY)/(SEVEN_DAYS-ONE_DAY), 0.55);
+  else if(ms<=THIRTY_D)   frac = Z2 + (Z3-Z2)*Math.pow((ms-SEVEN_DAYS)/(THIRTY_D-SEVEN_DAYS), 0.70);
+  else                    frac = Z3 + (Z4-Z3)*Math.pow((Math.min(ms,NINETY_D)-THIRTY_D)/(NINETY_D-THIRTY_D), 0.80);
+  return maxR * frac;
+}
+
+// ─── Overdue position: spread around center so multiple overdue tasks are tappable ──
+function overduePos(ent, allEntities, cx, cy, now){
+  const overdueEnts = allEntities.filter(e => e.deadline <= now);
+  const idx = overdueEnts.findIndex(e => e.id === ent.id);
+  const count = overdueEnts.length;
+  if(count <= 1) return { x: cx, y: cy };
+  const angle = (idx / count) * Math.PI * 2;
+  const spread = Math.min(18, count * 4);
+  return { x: cx + Math.cos(angle) * spread, y: cy + Math.sin(angle) * spread };
+}
+function expandRecurring(tmpl, now, hpMap, streakMap){
+  if(tmpl.paused) return [];
+  const windowEnd = now + THIRTY_D;
+  const stepMs    = freqMs(tmpl.freq);
+  const maxCount  = tmpl.count==="infinite" ? 9999 : Number(tmpl.count);
+  const freqLabel = (FREQ_OPTIONS.find(f=>f.value===tmpl.freq)?.label || "recurring").toLowerCase();
+  const suffix    = `(${freqLabel})`;
+  const rng       = seededRng(hashStr(tmpl.id));
+  const instances = [];
+  let   foundAny  = false;
+  for(let i=0; i<maxCount; i++){
+    const deadline = tmpl.startDeadline + i*stepMs;
+    const angle    = (rng()*Math.PI*2 + i*2.399) % (Math.PI*2);
+    const key = `${tmpl.id}:${i}`;
+    const hp  = hpMap[key] ?? tmpl.maxHp;
+    if(hp<=0) continue; // squished
+    if(deadline>windowEnd){
+      if(!foundAny){
+        instances.push({id:key, name:`${tmpl.name} ${suffix}`, deadline, type:tmpl.type,
+          maxHp:tmpl.maxHp, hp, angle, isRecurring:true,
+          templateId:tmpl.id, occIdx:i, streak:streakMap?.[tmpl.id]??0});
+        foundAny=true;
+      }
+      break;
+    }
+    instances.push({id:key, name:`${tmpl.name} ${suffix}`, deadline, type:tmpl.type,
+      maxHp:tmpl.maxHp, hp, angle, isRecurring:true,
+      templateId:tmpl.id, occIdx:i, streak:streakMap?.[tmpl.id]??0});
+    foundAny=true;
+  }
+  return instances;
+}
+
+// ─── Pure helpers ─────────────────────────────────────────────────────────────
+function hashStr(s){ let h=0; for(let i=0;i<s.length;i++) h=(Math.imul(31,h)+s.charCodeAt(i))|0; return h>>>0; }
+function seededRng(seed){ let s=seed>>>0; return ()=>{ s=(Math.imul(1664525,s)+1013904223)>>>0; return s/0x100000000; }; }
+
+function formatCountdown(ms){
+  if(ms<=0) return "OVERDUE";
+  const s=Math.floor(ms/1000), d=Math.floor(s/86400), h=Math.floor((s%86400)/3600), m=Math.floor((s%3600)/60);
+  if(d>0) return `${d}d ${h}h ${m}m`;
+  if(h>0) return `${h}h ${m}m`;
+  return `${m}m`;
+}
+const projectCurrentHp = p => (p.subtasks||[]).reduce((s,t)=>s+(t.hp??t.maxHp??1),0);
+const projectMaxHp     = p => (p.subtasks||[]).reduce((s,t)=>s+(t.maxHp??1),0);
+const projectAllDead   = p => (p.subtasks||[]).every(t=>(t.hp??t.maxHp??1)<=0);
+
+function spawnSquish(x, y, type){
+  const pal={
+    spinarak:  ["#5a9e3a","#8dc860","#cc2200","#fff"],
+    joltik:    ["#f0c830","#ffe878","#5090e0","#fff"],
+    dewpider:  ["#78c8b0","#a8e8d0","#2060b0","#cceeff"],
+    ariados:   ["#880020","#cc2244","#5a9e3a","#fff"],
+    galvantula:["#f0c830","#ffe878","#4488cc","#aaddff"],
+    araquanid: ["#2060b0","#78c8b0","#cceeff","#fff"],
+  };
+  const cols = pal[type]||["#fff","#aaa"];
+  const n    = type in BOSS_SPECIES ? 36 : 20;
+  const spd  = type in BOSS_SPECIES ? 10 : 7;
+  const sz   = type in BOSS_SPECIES ? 7  : 5;
+  return Array.from({length:n}, ()=>({
+    x, y,
+    vx:(Math.random()-0.5)*spd, vy:(Math.random()-0.5)*spd-2,
+    life:1, size:2+Math.random()*sz,
+    color:cols[Math.floor(Math.random()*cols.length)],
+    wx:x+(Math.random()-0.5)*60, wy:y+(Math.random()-0.5)*40,
+  }));
+}
+
+function pruneRecurringHp(hpMap, templates){
+  const now=Date.now(), pruned={...hpMap};
+  for(const key of Object.keys(pruned)){
+    const [tid,iStr] = key.split(":");
+    const tmpl = templates.find(t=>t.id===tid);
+    if(!tmpl){ delete pruned[key]; continue; }
+    if(tmpl.startDeadline + Number(iStr)*freqMs(tmpl.freq) < now - 7*ONE_DAY)
+      delete pruned[key];
+  }
+  return pruned;
+}
+
+// ─── Static star field ────────────────────────────────────────────────────────
+function buildStarField(W, H){
+  const off = document.createElement("canvas");
+  off.width=W; off.height=H;
+  const ctx = off.getContext("2d");
+  const rng = seededRng(137);
+
+  const sky = ctx.createLinearGradient(0,0,0,H);
+  sky.addColorStop(0,   "#05021a");
+  sky.addColorStop(0.35,"#08052a");
+  sky.addColorStop(0.65,"#060820");
+  sky.addColorStop(1,   "#040615");
+  ctx.fillStyle=sky; ctx.fillRect(0,0,W,H);
+
+  for(let i=0; i<280; i++){
+    const sx=rng()*W, sy=rng()*H, b=rng(), t=rng();
+    const sz=b>0.96?2:1, a=0.40+b*0.60;
+    const col = t>0.88?`rgba(255,238,200,${a})`
+              : t>0.76?`rgba(190,215,255,${a})`
+              : t>0.60?`rgba(255,255,255,${a})`
+              : t>0.42?`rgba(225,190,255,${a})`
+              : t>0.25?`rgba(180,255,235,${a})`
+              :        `rgba(255,210,240,${a})`;
+    ctx.fillStyle=col;
+    ctx.fillRect(Math.round(sx), Math.round(sy), sz, sz);
+    if(b>0.93){
+      const sa=a*0.45; ctx.fillStyle=`rgba(225,230,255,${sa})`;
+      ctx.fillRect(Math.round(sx)-2, Math.round(sy), 1, 1);
+      ctx.fillRect(Math.round(sx)+2, Math.round(sy), 1, 1);
+      ctx.fillRect(Math.round(sx), Math.round(sy)-2, 1, 1);
+      ctx.fillRect(Math.round(sx), Math.round(sy)+2, 1, 1);
+    }
+  }
+
+  // Moon radius: capped to never be tiny on narrow screens, but also never large enough to reach the web
+  // Moon is at (W*0.82, H*0.10), web center at (W*0.50, H*0.50) with radius min(W,H)*0.42
+  // Distance between them is always > 40% of the screen — moon halo (mR*5) can never reach the web
+  const mX=Math.floor(W*0.82), mY=Math.floor(H*0.10);
+  const mR=Math.floor(Math.max(Math.min(W,H)*0.052, 22)); // floor of 22px prevents tiny moon
+  const halo=ctx.createRadialGradient(mX,mY,mR*0.7,mX,mY,mR*5);
+  halo.addColorStop(0,"rgba(248,242,200,0.18)"); halo.addColorStop(0.3,"rgba(235,228,185,0.08)");
+  halo.addColorStop(0.65,"rgba(215,205,165,0.03)"); halo.addColorStop(1,"rgba(0,0,0,0)");
+  ctx.fillStyle=halo; ctx.beginPath(); ctx.arc(mX,mY,mR*5,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle="#eee5bc";
+  for(let dy=-mR; dy<=mR; dy++){
+    const dx=Math.floor(Math.sqrt(Math.max(0,mR*mR-dy*dy)));
+    ctx.fillRect(mX-dx, mY+dy, dx*2+1, 1);
+  }
+  const crater=(cx2,cy2,cr,col)=>{
+    ctx.fillStyle=col;
+    for(let dy=-cr; dy<=cr; dy++){
+      const dx=Math.floor(Math.sqrt(Math.max(0,cr*cr-dy*dy)));
+      ctx.fillRect(cx2-dx, cy2+dy, dx*2+1, 1);
+    }
+  };
+  crater(mX-Math.round(mR*0.30), mY-Math.round(mR*0.16), Math.round(mR*0.16), "#d9cd98");
+  crater(mX+Math.round(mR*0.26), mY+Math.round(mR*0.27), Math.round(mR*0.11), "#d5c58c");
+  crater(mX+Math.round(mR*0.07), mY-Math.round(mR*0.41), Math.round(mR*0.09), "#ddd1a2");
+  ctx.save(); ctx.beginPath(); ctx.arc(mX,mY,mR,0,Math.PI*2); ctx.clip();
+  const limb=ctx.createLinearGradient(mX-mR,mY,mX+mR,mY);
+  limb.addColorStop(0.55,"rgba(0,0,0,0)"); limb.addColorStop(1,"rgba(8,6,3,0.30)");
+  ctx.fillStyle=limb; ctx.fillRect(mX-mR,mY-mR,mR*2,mR*2); ctx.restore();
+  return off;
+}
+
+// ─── Aurora ───────────────────────────────────────────────────────────────────
+const AURORA_BANDS=[
+  {y:0.08,th:0.18,c:[50,230,190], a:0.055,f1:0.9, f2:1.4,s1:0.14,s2:0.20},
+  {y:0.18,th:0.20,c:[160,60,255], a:0.048,f1:1.2, f2:0.7,s1:0.18,s2:0.12},
+  {y:0.30,th:0.16,c:[255,60,180], a:0.038,f1:0.7, f2:1.8,s1:0.22,s2:0.16},
+  {y:0.44,th:0.22,c:[255,200,60], a:0.032,f1:1.5, f2:0.9,s1:0.12,s2:0.25},
+  {y:0.56,th:0.20,c:[40,200,255], a:0.042,f1:0.8, f2:1.6,s1:0.20,s2:0.14},
+  {y:0.68,th:0.18,c:[200,80,255], a:0.038,f1:1.1, f2:0.6,s1:0.16,s2:0.22},
+  {y:0.80,th:0.16,c:[60,255,180], a:0.030,f1:0.6, f2:1.3,s1:0.24,s2:0.18},
+  {y:0.50,th:0.80,c:[80,40,180],  a:0.020,f1:0.4, f2:0.3,s1:0.08,s2:0.06},
+  {y:0.22,th:0.12,c:[255,130,140],a:0.028,f1:1.8, f2:1.2,s1:0.28,s2:0.20},
+  {y:0.62,th:0.30,c:[20,210,210], a:0.022,f1:0.5, f2:0.8,s1:0.10,s2:0.16},
+];
+function drawAurora(ctx, W, H, time){
+  ctx.save();
+  for(const b of AURORA_BANDS){
+    const cy2=H*b.y, thPx=H*b.th, [r,g,bl]=b.c;
+    const grd=ctx.createLinearGradient(0,cy2-thPx*0.5,0,cy2+thPx*0.5);
+    grd.addColorStop(0,   `rgba(${r},${g},${bl},0)`);
+    grd.addColorStop(0.35,`rgba(${r},${g},${bl},${b.a})`);
+    grd.addColorStop(0.5, `rgba(${r},${g},${bl},${b.a*1.4})`);
+    grd.addColorStop(0.65,`rgba(${r},${g},${bl},${b.a})`);
+    grd.addColorStop(1,   `rgba(${r},${g},${bl},0)`);
+    ctx.fillStyle=grd;
+    for(const sign of [1,-1]){
+      ctx.beginPath(); ctx.moveTo(0,cy2);
+      for(let x=0; x<=W; x+=6){
+        const nx=x/W;
+        const wave = thPx*0.28*Math.sin(nx*Math.PI*3*b.f1+time*b.s1)
+                   + thPx*0.14*Math.sin(nx*Math.PI*5*b.f2+time*b.s2)
+                   + thPx*0.08*Math.sin(nx*Math.PI*8*b.f1+time*(b.s1+b.s2));
+        ctx.lineTo(x, cy2+wave);
+      }
+      ctx.lineTo(W, cy2+sign*thPx*0.5);
+      ctx.lineTo(0, cy2+sign*thPx*0.5);
+      ctx.closePath(); ctx.fill();
+    }
+  }
+  ctx.restore();
+}
+
+// ─── Web ──────────────────────────────────────────────────────────────────────
+function drawWeb(ctx, cx, cy, maxR, time, ripples){
+  const SPOKES=16, RINGS=7;
+  const sway = Math.sin(time*0.16)*0.55;
+  const angles = Array.from({length:SPOKES}, (_,i)=>
+    (i/SPOKES)*Math.PI*2 - Math.PI*0.5 + Math.sin(i*2.399)*0.048 + sway*0.005);
+
+  // Spokes
+  for(let i=0; i<SPOKES; i++){
+    const a=angles[i];
+    const sg=ctx.createLinearGradient(cx,cy, cx+Math.cos(a)*maxR, cy+Math.sin(a)*maxR);
+    sg.addColorStop(0,   "rgba(228,220,188,0.40)");
+    sg.addColorStop(0.38,"rgba(220,212,178,0.22)");
+    sg.addColorStop(1,   "rgba(200,192,155,0.07)");
+    ctx.strokeStyle=sg; ctx.lineWidth=0.72;
+    ctx.beginPath(); ctx.moveTo(cx,cy);
+    ctx.lineTo(cx+Math.cos(a)*maxR, cy+Math.sin(a)*maxR); ctx.stroke();
+  }
+
+  // Rings
+  for(let ring=1; ring<=RINGS; ring++){
+    const r=(maxR*ring)/RINGS, alpha=0.07+(ring/RINGS)*0.25;
+    ctx.strokeStyle=`rgba(222,215,182,${alpha.toFixed(2)})`;
+    ctx.lineWidth=ring<=2?0.5:ring<=5?0.72:0.95;
+    ctx.beginPath();
+    for(let i=0; i<=SPOKES; i++){
+      const a=angles[i%SPOKES];
+      const w=1+Math.sin(i*1.618+ring*1.1+time*0.11)*0.010;
+      const px=cx+Math.cos(a)*r*w, py=cy+Math.sin(a)*r*w;
+      i===0 ? ctx.moveTo(px,py) : ctx.lineTo(px,py);
+    }
+    ctx.closePath(); ctx.stroke();
+  }
+
+  // Zone rings
+  const zones=[{f:Z1,col:"rgba(210,162,255,0.30)",lbl:"1d"},{f:Z2,col:"rgba(120,182,255,0.24)",lbl:"7d"},{f:Z3,col:"rgba(100,222,192,0.20)",lbl:"30d"}];
+  for(const {f,col,lbl} of zones){
+    const zr=maxR*f;
+    ctx.save(); ctx.strokeStyle=col; ctx.lineWidth=0.9; ctx.setLineDash([4,7]);
+    ctx.beginPath(); ctx.arc(cx,cy,zr,0,Math.PI*2); ctx.stroke(); ctx.setLineDash([]);
+    ctx.font="bold 8px monospace";
+    ctx.fillStyle=col.replace(/[\d.]+\)$/, "0.58)");
+    ctx.textAlign="center"; ctx.fillText(lbl,cx,cy-zr-5); ctx.restore();
+  }
+
+  // Dew drops
+  for(let ring=RINGS-1; ring<=RINGS; ring++){
+    const r=(maxR*ring)/RINGS;
+    for(let i=0; i<SPOKES; i++){
+      if((i+ring)%2!==0) continue;
+      const a=angles[i], w=1+Math.sin(i*1.618+ring*1.1+time*0.11)*0.010;
+      const dx=cx+Math.cos(a)*r*w, dy2=cy+Math.sin(a)*r*w;
+      const p=(Math.sin(time*0.30+i*0.72)+1)*0.5;
+      const dg=ctx.createRadialGradient(dx,dy2,0,dx,dy2,5);
+      dg.addColorStop(0,`rgba(182,230,255,${0.22+p*0.12})`); dg.addColorStop(1,"rgba(0,0,0,0)");
+      ctx.fillStyle=dg; ctx.beginPath(); ctx.arc(dx,dy2,5,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(dx,dy2,1.5+p*0.4,0,Math.PI*2);
+      ctx.fillStyle=`rgba(190,232,255,${0.42+p*0.20})`; ctx.fill();
+      ctx.beginPath(); ctx.arc(dx-0.5,dy2-0.5,0.5,0,Math.PI*2);
+      ctx.fillStyle="rgba(255,255,255,0.84)"; ctx.fill();
+    }
+  }
+
+  // Ripples from clicks on the web
+  for(let i=ripples.length-1; i>=0; i--){
+    const rip=ripples[i]; rip.age+=0.016; // advanced by caller
+    const alpha=Math.max(0,0.55*(1-rip.age/rip.life));
+    if(alpha<=0){ ripples.splice(i,1); continue; }
+    ctx.save();
+    ctx.strokeStyle=`rgba(215,205,175,${alpha})`;
+    ctx.lineWidth=1.0*(1-rip.age/rip.life);
+    ctx.beginPath(); ctx.arc(rip.x, rip.y, rip.r*rip.age/rip.life, 0, Math.PI*2); ctx.stroke();
+    ctx.restore();
+  }
+
+  // Center star
+  const pulse=0.88+Math.sin(time*0.85)*0.12, sR=7*pulse;
+  const og=ctx.createRadialGradient(cx,cy,0,cx,cy,maxR*0.15*pulse);
+  og.addColorStop(0,`rgba(255,250,215,${0.22*pulse})`); og.addColorStop(1,"rgba(0,0,0,0)");
+  ctx.fillStyle=og; ctx.beginPath(); ctx.arc(cx,cy,maxR*0.15*pulse,0,Math.PI*2); ctx.fill();
+  const ig=ctx.createRadialGradient(cx,cy,0,cx,cy,18*pulse);
+  ig.addColorStop(0,`rgba(255,254,232,${0.90*pulse})`);
+  ig.addColorStop(0.35,`rgba(200,224,255,${0.42*pulse})`);
+  ig.addColorStop(1,"rgba(0,0,0,0)");
+  ctx.fillStyle=ig; ctx.beginPath(); ctx.arc(cx,cy,18*pulse,0,Math.PI*2); ctx.fill();
+  ctx.save(); ctx.translate(cx,cy);
+  ctx.fillStyle=`rgba(255,254,238,${0.97*pulse})`;
+  ctx.beginPath();
+  for(let i=0; i<8; i++){
+    const ang=(i/8)*Math.PI*2-Math.PI/2;
+    ctx.lineTo(Math.cos(ang)*(i%2===0?sR:sR*0.36), Math.sin(ang)*(i%2===0?sR:sR*0.36));
+  }
+  ctx.closePath(); ctx.fill();
+  ctx.beginPath(); ctx.arc(0,0,sR*0.22,0,Math.PI*2); ctx.fillStyle="#fff"; ctx.fill();
+  ctx.restore();
+}
+
+// ─── Fireflies ────────────────────────────────────────────────────────────────
+function makeFireflies(W, H, n=30){
+  return Array.from({length:n}, ()=>{
+    const a=Math.random()*Math.PI*2, d=Math.min(W,H)*0.5*(0.12+Math.random()*0.88);
+    return { x:W*0.5+Math.cos(a)*d, y:H*0.5+Math.sin(a)*d,
+             vx:(Math.random()-0.5)*0.28, vy:(Math.random()-0.5)*0.20,
+             phase:Math.random()*Math.PI*2, speed:0.45+Math.random()*0.85,
+             size:1.0+Math.random()*1.5, blinkOut:false, blinkTimer:0, blinkNext:8+Math.random()*20 };
+  });
+}
+
+// ─── Style constants ──────────────────────────────────────────────────────────
+const INP=(x={})=>({background:"rgba(8,6,24,0.97)",border:"1px solid rgba(112,102,178,0.34)",color:"#d2cef8",padding:"6px 9px",borderRadius:3,fontSize:11,fontFamily:"monospace",colorScheme:"dark",outline:"none",...x});
+const LBL={fontSize:8,color:"rgba(158,150,218,0.55)",letterSpacing:1.5,marginBottom:3,display:"block",fontFamily:"monospace"};
+const BTN=(v="primary")=>({
+  background: v==="danger"?"rgba(112,28,14,0.22)": v==="warn"?"rgba(140,90,0,0.22)": v==="neutral"?"rgba(22,20,40,0.18)":"rgba(78,70,145,0.22)",
+  border:`1px solid ${v==="danger"?"rgba(138,36,18,0.44)": v==="warn"?"rgba(160,110,0,0.40)": v==="neutral"?"rgba(46,42,65,0.30)":"rgba(98,90,172,0.40)"}`,
+  color:v==="danger"?"#d26858": v==="warn"?"#d4a030": v==="neutral"?"#626278":"#b2aaea",
+  padding:"6px 0", borderRadius:3, cursor:"pointer", fontSize:10, fontFamily:"monospace",
+});
+
+// ─── React components ─────────────────────────────────────────────────────────
+function HpBar({hp, maxHp, compact=false}){
+  if(!maxHp||maxHp<1) return null;
+  const ratio=Math.max(0,Math.min(1,hp/maxHp));
+  const hr=Math.round(220-ratio*140), hg=Math.round(60+ratio*160);
+  return (
+    <div style={{marginBottom:compact?0:8}}>
+      {!compact && <div style={{fontSize:8,fontFamily:"monospace",color:"rgba(178,170,232,0.58)",marginBottom:3,letterSpacing:1}}>{hp}/{maxHp} HP</div>}
+      <div style={{height:compact?4:6,background:"rgba(18,14,44,0.88)",borderRadius:3,overflow:"hidden",border:"1px solid rgba(112,102,182,0.24)"}}>
+        <div style={{height:"100%",width:`${ratio*100}%`,background:`rgb(${hr},${hg},62)`,borderRadius:3,transition:"width 0.2s"}}/>
+      </div>
+      {compact && <div style={{fontSize:7,fontFamily:"monospace",color:"rgba(178,170,232,0.48)",marginTop:1,textAlign:"center"}}>{hp}/{maxHp}</div>}
+    </div>
+  );
+}
+
+function ConfirmDialog({message, onConfirm, onCancel}){
+  return (
+    <div style={{position:"fixed",inset:0,zIndex:50,display:"flex",alignItems:"center",justifyContent:"center",background:"rgba(0,0,0,0.55)"}}>
+      <div style={{background:"rgba(8,6,26,0.98)",border:"1px solid rgba(112,102,178,0.38)",borderRadius:8,padding:"20px 24px",maxWidth:280,boxShadow:"0 4px 32px rgba(0,0,0,0.80)",textAlign:"center"}}>
+        <div style={{fontFamily:"monospace",fontSize:11,color:"#d0ccf8",marginBottom:16,lineHeight:1.6}}>{message}</div>
+        <div style={{display:"flex",gap:8}}>
+          <button onClick={onCancel}  style={{...BTN("neutral"),flex:1,padding:"7px 0"}}>cancel</button>
+          <button onClick={onConfirm} style={{...BTN("danger"), flex:1,padding:"7px 0"}}>confirm</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Main App ─────────────────────────────────────────────────────────────────
+function PokemonSilk(){
+  const canvasRef      = useRef(null);
+  const starRef        = useRef(null);
+  const spritesRef     = useRef({});
+  const stateRef       = useRef({tasks:[],projects:[],recurringInstances:[],popup:null,particles:[],splatters:[]});
+  const fliesRef       = useRef([]);
+  const animRef        = useRef(null);
+  const legPhasesRef   = useRef({});
+  const wiggleStateRef = useRef({});
+  const spawnTimeRef   = useRef({});
+  // Interactive canvas effects
+  const webStrands     = useRef([]); // {x1,y1,x2,y2,life,maxLife}
+  const webRipples     = useRef([]); // {x,y,r,age,life}
+
+  // ── Persisted state ────────────────────────────────────────────────────────
+  const [tasks,    setTasks]    = useState(()=> loadStored("psilk-tasks",    d=>d.map(t=>({...t,deadline:Number(t.deadline)})))    ?? []);
+  const [projects, setProjects] = useState(()=> loadStored("psilk-projects", d=>d.map(p=>({...p,deadline:Number(p.deadline)})))    ?? []);
+  const [recurringTemplates, setRecurringTemplates] = useState(()=>
+    loadStored("psilk-recurring", d=>d.map(t=>({...t,startDeadline:Number(t.startDeadline)}))) ?? []);
+  const [recurringHp, setRecurringHp] = useState(()=> loadStored("psilk-recurringHp", d=>d) ?? {});
+  const [streaks,     setStreaks]      = useState(()=> loadStored("psilk-streaks",     d=>d) ?? {});
+  const [tick, setTick] = useState(0);
+
+  // ── UI state ───────────────────────────────────────────────────────────────
+  const [popup,      setPopup]      = useState(null);
+  const [activeProj, setActiveProj] = useState(null);
+  const [editItem,   setEditItem]   = useState(null);
+  const [showForm,   setShowForm]   = useState(null);
+  const [confirm,    setConfirm]    = useState(null);
+
+  // Task form
+  const [nName,setNName]=useState(""); const [nDate,setNDate]=useState(""); const [nTime,setNTime]=useState("23:59");
+  const [nType,setNType]=useState("spinarak"); const [nHp,setNHp]=useState(1); const [nNote,setNNote]=useState("");
+  const [nRecurring,setNRecurring]=useState(false); const [nFreq,setNFreq]=useState("weekly"); const [nCount,setNCount]=useState("infinite");
+  // Project form
+  const [pName,setPName]=useState(""); const [pDate,setPDate]=useState(""); const [pTime,setPTime]=useState("23:59");
+  const [pType,setPType]=useState("ariados"); const [pSubtasks,setPSubtasks]=useState([{name:"",maxHp:1}]);
+
+  // Sync refs
+  useEffect(()=>{ stateRef.current.tasks=tasks; }, [tasks]);
+  useEffect(()=>{ stateRef.current.projects=projects; }, [projects]);
+  useEffect(()=>{ stateRef.current.popup=popup; }, [popup]);
+
+  // Persist
+  useEffect(()=>{ try{localStorage.setItem("psilk-tasks",    JSON.stringify(tasks));          }catch{} },[tasks]);
+  useEffect(()=>{ try{localStorage.setItem("psilk-projects", JSON.stringify(projects));       }catch{} },[projects]);
+  useEffect(()=>{ try{localStorage.setItem("psilk-recurring",JSON.stringify(recurringTemplates));}catch{} },[recurringTemplates]);
+  useEffect(()=>{ try{localStorage.setItem("psilk-recurringHp",JSON.stringify(recurringHp)); }catch{} },[recurringHp]);
+  useEffect(()=>{ try{localStorage.setItem("psilk-streaks",  JSON.stringify(streaks));        }catch{} },[streaks]);
+
+  // 30s tick for recurring refresh; 10min pruning
+  useEffect(()=>{ const id=setInterval(()=>setTick(t=>t+1),30000); return()=>clearInterval(id); },[]);
+  useEffect(()=>{
+    const prune=()=>setRecurringHp(hp=>pruneRecurringHp(hp,recurringTemplates));
+    prune();
+    const id=setInterval(prune,10*60*1000);
+    return()=>clearInterval(id);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[recurringTemplates.length]);
+
+  // Load sprites
+  useEffect(()=>{
+    [...Object.keys(SPECIES),...Object.keys(BOSS_SPECIES)].forEach(key=>{
+      const urls=spriteUrls(key); let idx=0;
+      const img=new Image(); img.crossOrigin="anonymous";
+      img.onload =()=>{ spritesRef.current[key]=img; };
+      img.onerror=()=>{ if(idx<urls.length) img.src=urls[idx++]; };
+      img.src=urls[idx++];
+    });
+  },[]);
+
+  // Expand recurring
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const recurringInstances=useMemo(()=>
+    recurringTemplates.flatMap(tmpl=>expandRecurring(tmpl,Date.now(),recurringHp,streaks)),
+  [recurringTemplates,recurringHp,streaks,tick]);
+  useEffect(()=>{ stateRef.current.recurringInstances=recurringInstances; },[recurringInstances]);
+
+  // ── Helpers ────────────────────────────────────────────────────────────────
+  const askConfirm=(message,onConfirm)=>setConfirm({message,onConfirm});
+
+  const cleanupRefs=(id)=>{
+    delete spawnTimeRef.current[id];
+    delete legPhasesRef.current[id];
+    delete wiggleStateRef.current[id];
+  };
+
+  const removeTask   =(id)=>{ setTasks(p=>p.filter(t=>t.id!==id));    cleanupRefs(id); setPopup(null); };
+  const removeProject=(id)=>{ setProjects(p=>p.filter(x=>x.id!==id)); cleanupRefs(id); setPopup(null); setActiveProj(null); };
+  const removeRecurringSeries=(templateId)=>{
+    setRecurringTemplates(p=>p.filter(t=>t.id!==templateId));
+    setRecurringHp(p=>{const n={...p};Object.keys(n).filter(k=>k.startsWith(templateId+":")).forEach(k=>delete n[k]);return n;});
+    setPopup(null);
+  };
+
+  const squishAt=(id, type, isProj)=>{
+    const canvas=canvasRef.current; if(!canvas) return;
+    const W=canvas.offsetWidth, H=canvas.offsetHeight;
+    const maxR=Math.min(W,H)*0.42, cx=W*0.50, cy=H*0.50;
+    const ent = isProj ? projects.find(p=>p.id===id)
+              : (tasks.find(t=>t.id===id) ?? recurringInstances.find(i=>i.id===id));
+    if(!ent) return;
+    const allEnts=[...tasks,...projects,...recurringInstances];
+    const now=Date.now();
+    const isOD=ent.deadline<=now;
+    const r=getRadius(ent.deadline,now,maxR);
+    const pos=isOD?overduePos(ent,allEnts,cx,cy,now):{x:cx+Math.cos(ent.angle)*r,y:cy+Math.sin(ent.angle)*r};
+    stateRef.current.particles=[...(stateRef.current.particles||[]),...spawnSquish(pos.x,pos.y,type)];
+  };
+
+  // ── Smart angle assignment ─────────────────────────────────────────────────
+  // Pick the angle that maximises the minimum angular distance from all existing entities
+  const bestAngle = useCallback((existingAngles) => {
+    if(existingAngles.length === 0) return Math.random() * Math.PI * 2;
+    const CANDIDATES = 32; // test this many evenly-spaced candidates
+    let best = 0, bestDist = -1;
+    for(let i = 0; i < CANDIDATES; i++){
+      const candidate = (i / CANDIDATES) * Math.PI * 2;
+      // Minimum angular distance to any existing angle
+      const minDist = existingAngles.reduce((min, a) => {
+        const d = Math.abs(candidate - a);
+        return Math.min(min, d, Math.PI * 2 - d); // wrap-around distance
+      }, Math.PI * 2);
+      if(minDist > bestDist){ bestDist = minDist; best = candidate; }
+    }
+    // Add a tiny random jitter so two tasks added at the same time don't land identically
+    return best + (Math.random() - 0.5) * 0.15;
+  }, []);
+
+  const allAngles = useCallback(() => [
+    ...tasks.map(t => t.angle),
+    ...projects.map(p => p.angle),
+    ...recurringInstances.map(i => i.angle),
+  ], [tasks, projects, recurringInstances]);
+
+  // ── Add task ───────────────────────────────────────────────────────────────
+  const addTask=useCallback(()=>{
+    if(!nName.trim()||!nDate) return;
+    const deadline=new Date(`${nDate}T${nTime||"23:59"}`).getTime(); if(isNaN(deadline)) return;
+    if(nRecurring){
+      setRecurringTemplates(prev=>[...prev,{
+        id:`rt_${Date.now()}`, name:nName.trim(), type:nType, maxHp:nHp,
+        freq:nFreq, count:nCount, startDeadline:deadline, paused:false, note:nNote.trim(),
+      }]);
+    } else {
+      const id=`t_${Date.now()}`; spawnTimeRef.current[id]=Date.now();
+      setTasks(prev=>[...prev,{id, name:nName.trim(), deadline, type:nType,
+        angle:bestAngle(allAngles()), maxHp:nHp, hp:nHp, note:nNote.trim()}]);
+    }
+    setNName(""); setNDate(""); setNTime("23:59"); setNHp(1); setNNote("");
+    setNRecurring(false); setNFreq("weekly"); setNCount("infinite"); setShowForm(null);
+  },[nName,nDate,nTime,nType,nHp,nNote,nRecurring,nFreq,nCount,bestAngle,allAngles]);
+
+  // ── Add project ────────────────────────────────────────────────────────────
+  const addProject=useCallback(()=>{
+    if(!pName.trim()||!pDate) return;
+    const valid=pSubtasks.filter(s=>s.name.trim()); if(!valid.length) return;
+    const deadline=new Date(`${pDate}T${pTime||"23:59"}`).getTime(); if(isNaN(deadline)) return;
+    const id=`p_${Date.now()}`; spawnTimeRef.current[id]=Date.now();
+    setProjects(prev=>[...prev,{id, name:pName.trim(), deadline, type:pType,
+      angle:bestAngle(allAngles()),
+      subtasks:valid.map(s=>({id:`st_${Date.now()}_${Math.random()}`,name:s.name.trim(),maxHp:s.maxHp,hp:s.maxHp}))}]);
+    setPName(""); setPDate(""); setPTime("23:59"); setPType("ariados"); setPSubtasks([{name:"",maxHp:1}]); setShowForm(null);
+  },[pName,pDate,pTime,pType,pSubtasks,bestAngle,allAngles]);
+
+  // ── Save edit ──────────────────────────────────────────────────────────────
+  const saveEdit=useCallback(()=>{
+    if(!editItem) return;
+    if(editItem.kind==="recurring"){
+      const deadline=new Date(`${editItem.date}T${editItem.time||"23:59"}`).getTime();
+      setRecurringTemplates(prev=>prev.map(t=>t.id===editItem.id?{...t,
+        name:editItem.name, type:editItem.type, maxHp:editItem.maxHp,
+        freq:editItem.freq, count:editItem.count, startDeadline:deadline,
+        note:editItem.note??""
+      }:t));
+      setEditItem(null); setPopup(null); return;
+    }
+    const deadline=new Date(`${editItem.date}T${editItem.time||"23:59"}`).getTime();
+    if(isNaN(deadline)||!editItem.name.trim()) return;
+    if(editItem.kind==="task")
+      setTasks(prev=>prev.map(t=>t.id===editItem.id?{...t,name:editItem.name,deadline,type:editItem.type,maxHp:editItem.maxHp,hp:editItem.hp,note:editItem.note??""}:t));
+    else
+      setProjects(prev=>prev.map(p=>p.id===editItem.id?{...p,name:editItem.name,deadline,type:editItem.type,subtasks:editItem.subtasks}:p));
+    setEditItem(null); setPopup(null);
+  },[editItem]);
+
+  // ── Bulk squish overdue ────────────────────────────────────────────────────
+  const bulkSquishOverdue=useCallback(()=>{
+    const now=Date.now();
+    const canvas=canvasRef.current;
+    const W=canvas?.offsetWidth||800, H=canvas?.offsetHeight||600;
+    const maxR=Math.min(W,H)*0.42, cx=W*0.50, cy=H*0.50;
+    setTasks(prev=>prev.filter(t=>{
+      if(t.deadline>now) return true;
+      stateRef.current.particles=[...(stateRef.current.particles||[]),...spawnSquish(cx,cy,t.type)];
+      cleanupRefs(t.id); return false;
+    }));
+    const newHp={...recurringHp}, newStreaks={...streaks};
+    for(const inst of recurringInstances){
+      if(inst.deadline<=now){
+        newHp[inst.id]=0; newStreaks[inst.templateId]=0;
+        stateRef.current.particles=[...(stateRef.current.particles||[]),...spawnSquish(cx,cy,inst.type)];
+        cleanupRefs(inst.id);
+      }
+    }
+    setRecurringHp(newHp); setStreaks(newStreaks); setPopup(null);
+  },[recurringHp,recurringInstances,streaks]);
+
+  // ── Export / Import ────────────────────────────────────────────────────────
+  const importRef=useRef(null);
+  const exportData=useCallback(()=>{
+    const data={tasks,projects,recurringTemplates,recurringHp,streaks,exportedAt:new Date().toISOString(),version:3};
+    const blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json"});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement("a"); a.href=url; a.download="pokemon-silk-v3-backup.json"; a.click();
+    URL.revokeObjectURL(url);
+  },[tasks,projects,recurringTemplates,recurringHp,streaks]);
+
+  const importData=useCallback((e)=>{
+    const file=e.target.files?.[0]; if(!file) return;
+    const reader=new FileReader();
+    reader.onload=(ev)=>{
+      try{
+        const data=JSON.parse(ev.target.result);
+        if(data.tasks)               setTasks(data.tasks.map(t=>({...t,deadline:Number(t.deadline)})));
+        if(data.projects)            setProjects(data.projects.map(p=>({...p,deadline:Number(p.deadline)})));
+        if(data.recurringTemplates)  setRecurringTemplates(data.recurringTemplates.map(t=>({...t,startDeadline:Number(t.startDeadline)})));
+        if(data.recurringHp)         setRecurringHp(data.recurringHp);
+        if(data.streaks)             setStreaks(data.streaks);
+        setConfirm(null);
+      }catch{ alert("Invalid backup file."); }
+    };
+    reader.readAsText(file); e.target.value="";
+  },[]);
+
+  // ── Canvas click ───────────────────────────────────────────────────────────
+  const handleClick=useCallback((e)=>{
+    const canvas=canvasRef.current; if(!canvas) return;
+    const rect=canvas.getBoundingClientRect();
+    const mx=e.clientX-rect.left, my=e.clientY-rect.top;
+    const W=canvas.offsetWidth, H=canvas.offsetHeight;
+    const maxR=Math.min(W,H)*0.42, cx=W*0.50, cy=H*0.50;
+    const now=Date.now();
+    const isTouchDevice=window.innerWidth<600;
+    const hitR=isTouchDevice?38:28, hitRProj=isTouchDevice?44:34;
+    const distToCenter=Math.hypot(mx-cx, my-cy);
+    const allEnts=[...(stateRef.current.recurringInstances||[]),...stateRef.current.tasks,...stateRef.current.projects];
+
+    // Check entities first
+    for(const inst of (stateRef.current.recurringInstances||[])){
+      const r=getRadius(inst.deadline,now,maxR);
+      const isOD=inst.deadline<=now;
+      const pos=isOD?overduePos(inst,allEnts,cx,cy,now):{x:cx+Math.cos(inst.angle)*r,y:cy+Math.sin(inst.angle)*r};
+      if(Math.hypot(mx-pos.x,my-pos.y)<hitR){
+        setPopup({kind:"recurring",id:inst.id,templateId:inst.templateId,occIdx:inst.occIdx,x:pos.x+rect.left,y:pos.y+rect.top});
+        setActiveProj(null); return;
+      }
+    }
+    for(const t of stateRef.current.tasks){
+      const r=getRadius(t.deadline,now,maxR);
+      const isOD=t.deadline<=now;
+      const pos=isOD?overduePos(t,allEnts,cx,cy,now):{x:cx+Math.cos(t.angle)*r,y:cy+Math.sin(t.angle)*r};
+      if(Math.hypot(mx-pos.x,my-pos.y)<hitR){
+        setPopup({kind:"task",id:t.id,x:pos.x+rect.left,y:pos.y+rect.top});
+        setActiveProj(null); return;
+      }
+    }
+    for(const p of stateRef.current.projects){
+      const r=getRadius(p.deadline,now,maxR);
+      const isOD=p.deadline<=now;
+      const pos=isOD?overduePos(p,allEnts,cx,cy,now):{x:cx+Math.cos(p.angle)*r,y:cy+Math.sin(p.angle)*r};
+      if(Math.hypot(mx-pos.x,my-pos.y)<hitRProj){
+        setPopup({kind:"project",id:p.id,x:pos.x+rect.left,y:pos.y+rect.top});
+        setActiveProj(id=>id===p.id?null:p.id); return;
+      }
+    }
+
+    setPopup(null);
+
+    // Click on web (within maxR) — ripple from click point
+    if(distToCenter<=maxR){
+      webRipples.current.push({x:mx, y:my, r:Math.min(maxR, distToCenter+60), age:0, life:1.4});
+    }
+
+    // Click on empty space (outside web) — shoot silk strand toward web center
+    if(distToCenter>maxR){
+      const angle=Math.atan2(cy-my, cx-mx); // toward center, not away
+      const tx=mx+Math.cos(angle)*(distToCenter-maxR*0.08);
+      const ty=my+Math.sin(angle)*(distToCenter-maxR*0.08);
+      webStrands.current.push({x1:mx,y1:my,x2:tx,y2:ty,life:1,maxLife:1.6});
+    }
+  },[]);
+
+  // ── Animation loop ─────────────────────────────────────────────────────────
+  useEffect(()=>{
+    const canvas=canvasRef.current; if(!canvas) return;
+    const ctx=canvas.getContext("2d");
+    let time=0, lastT=performance.now();
+    const shooters=[]; let nextShooter=5+Math.random()*10;
+    const starTwinkles=Array.from({length:280},()=>Math.random()*Math.PI*2);
+
+    const resize=()=>{
+      const dpr=window.devicePixelRatio||1;
+      canvas.width=canvas.offsetWidth*dpr; canvas.height=canvas.offsetHeight*dpr;
+      ctx.scale(dpr,dpr);
+      starRef.current=buildStarField(canvas.offsetWidth,canvas.offsetHeight);
+      fliesRef.current=makeFireflies(canvas.offsetWidth,canvas.offsetHeight);
+    };
+    resize(); window.addEventListener("resize",resize);
+
+    const loop=(now)=>{
+      const dt=Math.min((now-lastT)/1000,0.05); lastT=now; time+=dt;
+      const W=canvas.offsetWidth, H=canvas.offsetHeight;
+      const maxR=Math.min(W,H)*0.42, cx=W*0.50, cy=H*0.50;
+      const tNow=Date.now();
+      const ts=stateRef.current.tasks, ps=stateRef.current.projects;
+      const ri=stateRef.current.recurringInstances||[], pop=stateRef.current.popup;
+
+      // Background
+      if(starRef.current){ ctx.imageSmoothingEnabled=false; ctx.drawImage(starRef.current,0,0,W,H); }
+      drawAurora(ctx,W,H,time);
+
+      // Twinkling stars
+      const rng2=seededRng(137);
+      for(let i=0;i<280;i++){
+        const sx=rng2()*W,sy=rng2()*H,b=rng2(); rng2();
+        if(b>0.80){
+          const tw=0.50+0.50*Math.sin(starTwinkles[i]+time*(0.35+b*0.75));
+          ctx.fillStyle=`rgba(255,255,255,${(0.40+b*0.60)*tw*0.55})`;
+          ctx.fillRect(Math.round(sx),Math.round(sy),b>0.96?2:1,b>0.96?2:1);
+        }
+      }
+
+      // Shooting stars
+      nextShooter-=dt;
+      if(nextShooter<=0){
+        const ang=(18+Math.random()*28)*Math.PI/180, spd=300+Math.random()*240;
+        shooters.push({x:Math.random()*W*0.55,y:Math.random()*H*0.25,vx:Math.cos(ang)*spd,vy:Math.sin(ang)*spd,life:1,len:70+Math.random()*90});
+        nextShooter=7+Math.random()*14;
+      }
+      for(let i=shooters.length-1;i>=0;i--){
+        const sh=shooters[i]; sh.x+=sh.vx*dt; sh.y+=sh.vy*dt; sh.life-=dt*1.6;
+        if(sh.life<=0||sh.x>W||sh.y>H){shooters.splice(i,1);continue;}
+        const a2=Math.atan2(sh.vy,sh.vx);
+        const tx2=sh.x-Math.cos(a2)*sh.len*sh.life, ty2=sh.y-Math.sin(a2)*sh.len*sh.life;
+        const sg=ctx.createLinearGradient(tx2,ty2,sh.x,sh.y);
+        sg.addColorStop(0,"rgba(255,255,255,0)"); sg.addColorStop(0.6,`rgba(220,228,255,${sh.life*0.32})`); sg.addColorStop(1,`rgba(255,255,255,${sh.life*0.88})`);
+        ctx.strokeStyle=sg; ctx.lineWidth=1.1;
+        ctx.beginPath(); ctx.moveTo(tx2,ty2); ctx.lineTo(sh.x,sh.y); ctx.stroke();
+        ctx.beginPath(); ctx.arc(sh.x,sh.y,1.1*sh.life,0,Math.PI*2); ctx.fillStyle=`rgba(240,242,255,${sh.life*0.92})`; ctx.fill();
+      }
+
+      // Fireflies
+      for(const f of fliesRef.current){
+        f.blinkTimer+=dt;
+        if(!f.blinkOut&&f.blinkTimer>f.blinkNext){f.blinkOut=true;f.blinkTimer=0;f.blinkNext=0.3+Math.random()*0.8;}
+        if(f.blinkOut&&f.blinkTimer>f.blinkNext){
+          f.blinkOut=false;f.blinkTimer=0;f.blinkNext=8+Math.random()*20;
+          f.x+=(Math.random()-0.5)*55;f.y+=(Math.random()-0.5)*55;
+        }
+        if(f.blinkOut) continue;
+        f.x+=f.vx;f.y+=f.vy;
+        f.vx+=(Math.random()-0.5)*0.026;f.vy+=(Math.random()-0.5)*0.018;
+        f.vx=Math.max(-0.44,Math.min(0.44,f.vx));f.vy=Math.max(-0.32,Math.min(0.32,f.vy));
+        const ddx=cx-f.x,ddy=cy-f.y;
+        if(Math.hypot(ddx,ddy)>maxR*2.0){f.vx+=ddx*0.00016;f.vy+=ddy*0.00016;}
+        if(f.x<0||f.x>W)f.vx*=-1;if(f.y<0||f.y>H)f.vy*=-1;
+        f.phase+=dt*f.speed;
+        const glow=(Math.sin(f.phase)+1)*0.5; if(glow<0.06) continue;
+        const fg=ctx.createRadialGradient(f.x,f.y,0,f.x,f.y,f.size*10);
+        fg.addColorStop(0,`rgba(255,228,55,${glow*0.78})`);fg.addColorStop(0.3,`rgba(255,198,25,${glow*0.20})`);fg.addColorStop(1,"rgba(0,0,0,0)");
+        ctx.fillStyle=fg;ctx.beginPath();ctx.arc(f.x,f.y,f.size*10,0,Math.PI*2);ctx.fill();
+        ctx.fillStyle=`rgba(255,248,165,${glow*0.92})`;ctx.fillRect(Math.round(f.x),Math.round(f.y),2,2);
+      }
+
+      // Advance ripple ages (drawWeb reads and mutates them)
+      for(const rip of webRipples.current) rip.age+=dt;
+
+      // Web (passes ripples array for rendering + cleanup)
+      drawWeb(ctx,cx,cy,maxR,time,webRipples.current);
+
+      // Silk strands from empty-space clicks
+      for(let i=webStrands.current.length-1;i>=0;i--){
+        const s=webStrands.current[i]; s.life-=dt/s.maxLife;
+        if(s.life<=0){webStrands.current.splice(i,1);continue;}
+        const alpha=s.life*0.55;
+        const sg=ctx.createLinearGradient(s.x1,s.y1,s.x2,s.y2);
+        sg.addColorStop(0,`rgba(215,208,172,0)`);
+        sg.addColorStop(0.3,`rgba(215,208,172,${alpha})`);
+        sg.addColorStop(1,`rgba(215,208,172,${alpha*0.4})`);
+        ctx.save();ctx.strokeStyle=sg;ctx.lineWidth=0.8;
+        ctx.setLineDash([3,5]);ctx.beginPath();ctx.moveTo(s.x1,s.y1);ctx.lineTo(s.x2,s.y2);ctx.stroke();
+        ctx.setLineDash([]);
+        // Tiny dew drop at the end point
+        ctx.beginPath();ctx.arc(s.x2,s.y2,1.5*s.life,0,Math.PI*2);
+        ctx.fillStyle=`rgba(190,230,255,${alpha*0.8})`;ctx.fill();
+        ctx.restore();
+      }
+
+      // Splatters
+      stateRef.current.splatters=(stateRef.current.splatters||[]).filter(sp=>{
+        sp.age+=dt; const alpha=Math.max(0,1-sp.age/sp.life); if(alpha<=0) return false;
+        ctx.save();ctx.globalAlpha=alpha*0.50;ctx.fillStyle=sp.color;
+        ctx.beginPath();ctx.arc(sp.wx,sp.wy,sp.size*0.55,0,Math.PI*2);ctx.fill();ctx.restore();
+        return true;
+      });
+
+      // Particles
+      stateRef.current.particles=(stateRef.current.particles||[]).filter(p=>{
+        p.x+=p.vx;p.y+=p.vy;p.vy+=0.09;p.life-=dt*1.8;
+        if(p.life<=0){
+          (stateRef.current.splatters=stateRef.current.splatters||[]).push({wx:p.x,wy:p.y,size:p.size,color:p.color,age:0,life:3+Math.random()*2});
+          return false;
+        }
+        ctx.save();ctx.globalAlpha=p.life;ctx.imageSmoothingEnabled=false;ctx.fillStyle=p.color;
+        const ps=Math.round(Math.max(1,p.size*p.life));
+        ctx.fillRect(Math.round(p.x),Math.round(p.y),ps,ps);ctx.restore();
+        return true;
+      });
+
+      // ── Render entity ──────────────────────────────────────────────────────
+      const renderEnt=(ent,isProj)=>{
+        if(!legPhasesRef.current[ent.id])   legPhasesRef.current[ent.id]  =Math.random()*Math.PI*2;
+        if(!wiggleStateRef.current[ent.id]) wiggleStateRef.current[ent.id]={
+          // Spin/jiggle timer
+          timer:2+Math.random()*8, mode:null, total:0, dur:0, spinDir:1, timer_next:5+Math.random()*10,
+          // Flip timer (independent) — tracks persistent facing direction
+          flipTimer:3+Math.random()*10, flipping:false, flipTotal:0, flipDur:0,
+          flipFrom:1, flipTo:-1, facing:1, flipNext:6+Math.random()*14,
+        };
+        const lp=legPhasesRef.current[ent.id];
+        const wtd=wiggleStateRef.current[ent.id];
+        const ms=ent.deadline-tNow, overdue=ms<=0;
+        const r=overdue?0:getRadius(ent.deadline,tNow,maxR);
+        legPhasesRef.current[ent.id]+=dt*(overdue?4:(0.4+(1-r/maxR)*3.5))*(isProj?2:3);
+
+        // ── Spin / jiggle timer ──
+        wtd.timer-=dt;
+        let angleOff=0, spriteRot=0;
+        if(!wtd.mode&&wtd.timer<=0){
+          wtd.mode=Math.random()<0.5?"spin":"jiggle";
+          wtd.total=0;
+          wtd.dur=wtd.mode==="spin"?(0.9+Math.random()*0.4):(0.4+Math.random()*0.3);
+          wtd.spinDir=Math.random()<0.5?1:-1;
+          wtd.timer=wtd.timer_next;
+        }
+        if(wtd.mode==="jiggle"){
+          wtd.total+=dt;
+          angleOff=Math.sin(wtd.total/wtd.dur*Math.PI*4)*0.028;
+          if(wtd.total>=wtd.dur){wtd.mode=null;wtd.timer_next=5+Math.random()*10;}
+        }
+        if(wtd.mode==="spin"){
+          wtd.total+=dt;
+          spriteRot=wtd.spinDir*(wtd.total/wtd.dur)*Math.PI*2;
+          if(wtd.total>=wtd.dur){wtd.mode=null;wtd.timer_next=5+Math.random()*10;}
+        }
+
+        // ── Flip timer (independent) ──
+        wtd.flipTimer-=dt;
+        let flipScaleX=wtd.facing??1;
+        if(!wtd.flipping&&wtd.flipTimer<=0){
+          wtd.flipping=true; wtd.flipTotal=0;
+          wtd.flipDur=0.28+Math.random()*0.15;
+          wtd.flipFrom=wtd.facing??1;
+          wtd.flipTo=-(wtd.facing??1); // flip to opposite direction
+          wtd.flipNext=6+Math.random()*14;
+          wtd.flipTimer=wtd.flipNext;
+        }
+        if(wtd.flipping){
+          wtd.flipTotal+=dt;
+          const p=Math.min(1, wtd.flipTotal/wtd.flipDur);
+          // Smooth ease through 0: scaleX goes from flipFrom → 0 → flipTo
+          // Use sine easing: at p=0 we're at flipFrom, at p=1 we're at flipTo
+          flipScaleX=wtd.flipFrom + (wtd.flipTo - wtd.flipFrom)*p;
+          if(p>=1){
+            wtd.flipping=false;
+            wtd.facing=wtd.flipTo; // persist the new facing direction
+            flipScaleX=wtd.flipTo;
+          }
+        }
+
+        // ── Breathing (constant, both sizes) ──
+        const breathe = 1 + Math.sin(time*(isProj?1.1:1.4) + (legPhasesRef.current[ent.id]*0.1))*0.028;
+        const bossScale = breathe;
+        // Overdue entities spread around center so multiple are individually visible/tappable
+        const basePos = overdue ? overduePos(ent, allEnts, cx, cy, tNow) : {x: cx+Math.cos(ent.angle+angleOff)*r, y: cy+Math.sin(ent.angle+angleOff)*r};
+        const sx=basePos.x, sy=basePos.y;
+        const bob=Math.sin(lp*0.4)*1.8, sz=(isProj?80:68)*bossScale;
+        const isSel=pop?.id===ent.id;
+        const scol=speciesColor(ent.type);
+
+        // Overdue pulse
+        if(overdue){
+          const pulse2=0.5+0.5*Math.sin(time*3);
+          const ug=ctx.createRadialGradient(sx,sy,0,sx,sy,sz*1.4);
+          ug.addColorStop(0,`rgba(255,30,10,${0.25*pulse2})`);ug.addColorStop(1,"rgba(0,0,0,0)");
+          ctx.fillStyle=ug;ctx.beginPath();ctx.arc(sx,sy,sz*1.4,0,Math.PI*2);ctx.fill();
+        }
+        // Urgency glow
+        if(!overdue&&ms<ONE_DAY){
+          const ua=0.08+0.12*(1-ms/ONE_DAY);
+          const ug=ctx.createRadialGradient(sx,sy+bob,0,sx,sy+bob,sz*0.9);
+          ug.addColorStop(0,`rgba(255,55,35,${ua})`);ug.addColorStop(1,"rgba(0,0,0,0)");
+          ctx.fillStyle=ug;ctx.beginPath();ctx.arc(sx,sy+bob,sz*0.9,0,Math.PI*2);ctx.fill();
+        }
+
+        // Thread
+        if(!overdue){
+          ctx.save();
+          ctx.strokeStyle=isSel?"rgba(255,234,115,0.54)":"rgba(222,215,180,0.15)";
+          ctx.lineWidth=0.85; ctx.setLineDash([3,6]);
+          ctx.beginPath();ctx.moveTo(cx,cy);ctx.lineTo(sx,sy+bob);ctx.stroke();ctx.setLineDash([]);
+          if(isSel){ctx.beginPath();ctx.arc(sx,sy+bob,isProj?38:30,0,Math.PI*2);ctx.strokeStyle="rgba(255,230,90,0.70)";ctx.lineWidth=1.5;ctx.stroke();}
+          ctx.restore();
+        }
+
+        // Sprite — applies breathing (sz), spin (spriteRot), flip (flipScaleX)
+        const spawnAge=spawnTimeRef.current[ent.id]?(tNow-spawnTimeRef.current[ent.id])/1000:99;
+        const fadeIn=Math.min(1,spawnAge/0.8);
+        const img=spritesRef.current[ent.type];
+        const needsTransform = spriteRot!==0 || wtd.flipping;
+        ctx.save(); ctx.imageSmoothingEnabled=false; ctx.globalAlpha=fadeIn;
+        if(img&&img.complete&&img.naturalWidth>0){
+          // Shadow ellipse
+          ctx.globalAlpha=0.18*fadeIn; ctx.fillStyle="#000";
+          ctx.beginPath(); ctx.ellipse(sx,sy+sz*0.52+bob,sz*0.26,3,0,0,Math.PI*2); ctx.fill();
+          ctx.globalAlpha=fadeIn;
+          if(needsTransform){
+            // During active animation: use transform. Bob is baked into translate Y.
+            ctx.translate(sx, sy+bob);
+            if(spriteRot!==0) ctx.rotate(spriteRot);
+            ctx.scale(flipScaleX, 1);
+            ctx.drawImage(img, -sz/2, -sz/2, sz, sz);
+          } else {
+            // At rest: fast path. Apply facing (flipScaleX is ±1) via scale around center.
+            if(flipScaleX===-1){
+              ctx.translate(sx, sy+bob);
+              ctx.scale(-1, 1);
+              ctx.drawImage(img, -sz/2, -sz/2, sz, sz);
+            } else {
+              ctx.drawImage(img, sx-sz/2, sy-sz/2+bob, sz, sz);
+            }
+          }
+        } else {
+          ctx.fillStyle=scol.text; ctx.beginPath(); ctx.arc(sx,sy+bob,sz*0.4,0,Math.PI*2); ctx.fill();
+        }
+        ctx.restore();
+
+        // Label pill — species-coloured
+        const raw=ent.name.length>14?ent.name.slice(0,13)+"…":ent.name;
+        const cd=overdue?"OVERDUE":formatCountdown(ms);
+        const hpTxt=isProj?`${projectCurrentHp(ent)}/${projectMaxHp(ent)} HP`:null;
+        const th=hpTxt?38:27;
+        const lx2=sx+Math.cos(ent.angle+angleOff)*(sz*0.52+th*0.5+8);
+        const ly2=sy+Math.sin(ent.angle+angleOff)*(sz*0.52+th*0.5+8)+bob;
+        ctx.save();ctx.globalAlpha=fadeIn;ctx.font="bold 11px monospace";ctx.textAlign="center";
+        const tw=Math.max(ctx.measureText(raw).width,ctx.measureText(cd).width,hpTxt?ctx.measureText(hpTxt).width:0)+18;
+        // Pill background: species tint unless selected/overdue
+        ctx.fillStyle=isSel?"rgba(22,14,4,0.96)":overdue?"rgba(28,4,4,0.92)":scol.pill;
+        ctx.beginPath();ctx.roundRect(lx2-tw/2,ly2-th/2,tw,th,3);ctx.fill();
+        ctx.strokeStyle=isSel?"rgba(255,218,60,0.65)":overdue?"rgba(255,80,60,0.40)":scol.border;
+        ctx.lineWidth=0.8;ctx.stroke();
+        ctx.fillStyle=isSel?"#ffe050":overdue?"#ff7060":scol.text;
+        ctx.fillText(raw,lx2,ly2-(hpTxt?11:2));
+        ctx.font="10px monospace";
+        ctx.fillStyle=isSel?"#ffbe1a":overdue?"rgba(255,130,100,0.90)":"rgba(210,206,246,0.82)";
+        ctx.fillText(cd,lx2,ly2+(hpTxt?1:10));
+        if(hpTxt){ctx.font="9px monospace";ctx.fillStyle=isSel?"rgba(255,202,82,0.94)":"rgba(152,192,255,0.70)";ctx.fillText(hpTxt,lx2,ly2+13);}
+        ctx.restore();
+
+        // HP bar
+        const mhp2=isProj?projectMaxHp(ent):(ent.maxHp??1);
+        const chp2=isProj?projectCurrentHp(ent):(ent.hp??ent.maxHp??1);
+        if(mhp2>1){
+          const barW=Math.max(tw,50),barH=5,barX=lx2-barW/2,barY=ly2+th/2+(hpTxt?15:4);
+          const ratio=Math.max(0,Math.min(1,chp2/mhp2));
+          const hr2=Math.round(220-ratio*140),hg2=Math.round(60+ratio*160);
+          ctx.save();ctx.globalAlpha=fadeIn;
+          ctx.fillStyle="rgba(4,4,20,0.85)";ctx.beginPath();ctx.roundRect(barX,barY,barW,barH,2);ctx.fill();
+          if(ratio>0){ctx.fillStyle=`rgba(${hr2},${hg2},62,0.92)`;ctx.beginPath();ctx.roundRect(barX,barY,barW*ratio,barH,2);ctx.fill();}
+          if(!isProj){
+            ctx.strokeStyle="rgba(4,4,14,0.55)";ctx.lineWidth=1;
+            for(let p2=1;p2<mhp2;p2++){const px2=barX+(barW/mhp2)*p2;ctx.beginPath();ctx.moveTo(px2,barY);ctx.lineTo(px2,barY+barH);ctx.stroke();}
+            ctx.font="8px monospace";ctx.fillStyle="rgba(218,214,250,0.78)";ctx.textAlign="center";
+            ctx.fillText(`${chp2}/${mhp2}`,lx2,barY+barH+9);
+          }
+          ctx.restore();
+        }
+      };
+
+      // Build allEnts once — used by overduePos for multiple entities per frame
+      const allEnts=[...ts,...ri,...ps];
+
+      [...ri,...ts].forEach(t=>renderEnt(t,false));
+      ps.forEach(p=>renderEnt(p,true));
+
+      // Vignette
+      const vig=ctx.createRadialGradient(cx,cy,maxR*0.40,cx,cy,Math.max(W,H)*0.82);
+      vig.addColorStop(0,"rgba(0,0,0,0)");vig.addColorStop(0.55,"rgba(0,0,0,0.04)");vig.addColorStop(1,"rgba(0,0,0,0.68)");
+      ctx.fillStyle=vig;ctx.fillRect(0,0,W,H);
+
+      if(pop){
+        ctx.save();ctx.font="8px monospace";ctx.fillStyle="rgba(255,220,65,0.52)";
+        ctx.textAlign="center";ctx.fillText("tap to edit or squish",W/2,H-12);ctx.restore();
+      }
+
+      animRef.current=requestAnimationFrame(loop);
+    };
+    animRef.current=requestAnimationFrame(loop);
+    return()=>{cancelAnimationFrame(animRef.current);window.removeEventListener("resize",resize);};
+  },[]);
+
+  // ── Derived ────────────────────────────────────────────────────────────────
+  const todayStr  = new Date().toISOString().split("T")[0];
+  const selTask   = popup?.kind==="task"      ? tasks.find(t=>t.id===popup.id)??null            : null;
+  const selRecI   = popup?.kind==="recurring" ? recurringInstances.find(i=>i.id===popup.id)??null : null;
+  const selRecT   = selRecI ? recurringTemplates.find(t=>t.id===selRecI.templateId)??null       : null;
+  const selProj   = popup?.kind==="project"   ? projects.find(p=>p.id===popup.id)??null         : null;
+  const activeProjObj = activeProj ? projects.find(p=>p.id===activeProj)??null : null;
+  const totalCount=tasks.length+projects.length+recurringInstances.length;
+  const now2=Date.now();
+  const overdueCount=tasks.filter(t=>t.deadline<=now2).length+recurringInstances.filter(i=>i.deadline<=now2).length;
+  const countOptions=[...Array.from({length:20},(_,i)=>String(i+1)),"infinite"];
+
+  // isMobile must be declared before popLeft/popTop which reference it
+  const [isMobile, setIsMobile] = useState(()=>window.innerWidth<600);
+  useEffect(()=>{
+    const fn=()=>setIsMobile(window.innerWidth<600);
+    window.addEventListener("resize",fn); return()=>window.removeEventListener("resize",fn);
+  },[]);
+  const [showInfo, setShowInfo] = useState(false);
+
+  const popLeft=popup?(()=>{
+    const PAD=8, W=isMobile?window.innerWidth-16:220;
+    const ideal=popup.x-W/2;
+    const clamped=Math.max(PAD, Math.min(ideal, window.innerWidth-W-PAD));
+    if(activeProjObj && !isMobile){
+      const subtaskRight=320;
+      if(clamped < subtaskRight) return Math.min(subtaskRight+PAD, window.innerWidth-W-PAD);
+    }
+    return clamped;
+  })():0;
+  const popTop=popup?(()=>{
+    const PAD=8, H=280; // popup card height (edit is now a centered modal, not here)
+    const below=popup.y+36;
+    const above=popup.y-H-8;
+    const headerH=isMobile?82:46;
+    if(below+H>window.innerHeight-PAD && above>headerH) return above;
+    return Math.max(headerH+PAD, Math.min(below, window.innerHeight-H-PAD));
+  })():0;
+
+  const PopCard=({children,w})=>(
+    <div onClick={e=>e.stopPropagation()} style={{
+      position:"fixed",
+      left:isMobile?8:popLeft, top:isMobile?"auto":popTop, bottom:isMobile?8:undefined,
+      background:"rgba(5,4,22,0.97)", border:"1px solid rgba(112,104,178,0.34)",
+      borderRadius:6, padding:"13px 15px", zIndex:31,
+      width:isMobile?"calc(100vw - 16px)":w||"auto",
+      minWidth:isMobile?undefined:w?undefined:196,
+      maxHeight:isMobile?"65vh":undefined, overflowY:isMobile?"auto":undefined,
+      boxShadow:"0 2px 30px rgba(0,0,0,0.84), 0 0 14px rgba(112,104,205,0.14)",
+    }}>{children}</div>
+  );
+  const Field=({label,children})=>(
+    <div style={{display:"flex",flexDirection:"column",marginBottom:7}}>
+      <label style={LBL}>{label}</label>{children}
+    </div>
+  );
+  const formStyle={
+    position:"absolute",top:isMobile?82:46,left:"50%",transform:"translateX(-50%)",
+    background:"rgba(5,4,22,0.97)", border:"1px solid rgba(98,90,164,0.30)",
+    borderRadius:5, padding:"14px 16px", zIndex:20,
+    boxShadow:"0 2px 28px rgba(0,0,0,0.86)",
+    maxWidth:isMobile?"calc(100vw - 16px)":undefined,
+    maxHeight:"80vh", overflowY:"auto",
+    width:isMobile?"calc(100vw - 16px)":undefined,
+    boxSizing:"border-box",
+  };
+
+  // Shared note field style
+  const noteStyle=INP({width:"100%",boxSizing:"border-box",resize:"vertical",minHeight:52,fontSize:10});
+
+  return(
+    <div style={{width:"100%",height:"100vh",background:"#05021a",position:"relative",overflow:"hidden"}}>
+      <canvas ref={canvasRef} onClick={handleClick}
+        style={{width:"100%",height:"100%",display:"block",cursor:"crosshair",imageRendering:"pixelated"}}/>
+
+      {/* Backdrop — dismisses popup only, NOT edit form (mid-input, destructive) */}
+      {popup&&!editItem&&<div onClick={()=>setPopup(null)} style={{position:"fixed",inset:0,zIndex:28,background:"transparent"}}/>}
+
+      {confirm&&<ConfirmDialog message={confirm.message}
+        onConfirm={()=>{confirm.onConfirm();setConfirm(null);}}
+        onCancel={()=>setConfirm(null)}/>}
+
+      <input ref={importRef} type="file" accept=".json" onChange={importData} style={{display:"none"}}/>
+
+      {/* ── Header ─────────────────────────────────────────────────────────── */}
+      <div style={{position:"absolute",top:0,left:0,right:0,padding:isMobile?"8px 12px":"10px 16px",
+        display:"flex",flexDirection:isMobile?"column":"row",alignItems:isMobile?"stretch":"center",
+        justifyContent:"space-between",gap:isMobile?6:0,
+        background:"linear-gradient(to bottom,rgba(3,2,16,0.94) 55%,transparent)"}}>
+        {/* Row 1: logo + status + info */}
+        <div style={{display:"flex",alignItems:"center",gap:10,justifyContent:"space-between"}}>
+          <div style={{display:"flex",alignItems:"center",gap:10}}>
+            <svg width="22" height="22" viewBox="0 0 22 22" style={{flexShrink:0}}>
+              <circle cx="11" cy="11" r="2.2" fill="rgba(195,245,240,0.96)"/>
+              {[0,1,2,3,4,5,6,7].map(i=>{
+                const a=(i/8)*Math.PI*2-Math.PI/2;
+                return <line key={i} x1="11" y1="11" x2={11+Math.cos(a)*10} y2={11+Math.sin(a)*10} stroke="rgba(218,210,178,0.36)" strokeWidth="0.7"/>;
+              })}
+              {[0.38,0.65,0.92].map((f,i)=>
+                <circle key={i} cx="11" cy="11" r={f*10} fill="none" stroke={`rgba(218,210,178,${0.12+i*0.06})`} strokeWidth="0.7"/>
+              )}
+            </svg>
+            <div>
+              <span style={{fontFamily:"monospace",fontSize:isMobile?12:14,color:"#d0c8ff",letterSpacing:2,fontWeight:"bold"}}>Pokémon Silk</span>
+              <span style={{fontSize:9,color:"rgba(190,184,245,0.60)",marginLeft:9,letterSpacing:1,fontFamily:"monospace"}}>
+                {totalCount>0?`${totalCount} lurking`:"all clear"}
+              </span>
+              {overdueCount>0&&<span style={{fontSize:9,color:"rgba(255,100,80,0.85)",marginLeft:8,letterSpacing:1,fontFamily:"monospace"}}>· {overdueCount} overdue</span>}
+            </div>
+          </div>
+          {/* Info button — always visible next to title */}
+          <button onClick={()=>setShowInfo(true)} title="How to play"
+            style={{background:"rgba(70,60,130,0.20)",border:"1px solid rgba(110,100,180,0.32)",
+              color:"rgba(180,172,240,0.75)",padding:"4px 9px",borderRadius:3,
+              cursor:"pointer",fontSize:11,fontFamily:"monospace",letterSpacing:0,lineHeight:1}}>ⓘ</button>
+        </div>
+        {/* Row 2 (or right side): action buttons */}
+        <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap",justifyContent:isMobile?"flex-start":"flex-end"}}>
+          {overdueCount>0&&(
+            <button onClick={()=>askConfirm(`Squish all ${overdueCount} overdue task${overdueCount>1?"s":""}?`,bulkSquishOverdue)}
+              style={{background:"rgba(140,30,14,0.22)",border:"1px solid rgba(160,40,18,0.45)",
+                color:"rgba(255,120,90,0.90)",padding:"5px 10px",borderRadius:3,
+                cursor:"pointer",fontSize:9,letterSpacing:1,fontFamily:"monospace"}}>
+              💀 squish overdue
+            </button>
+          )}
+          <button onClick={exportData} title="Export backup"
+            style={{background:"rgba(40,60,120,0.18)",border:"1px solid rgba(60,90,160,0.32)",
+              color:"rgba(150,180,240,0.72)",padding:"5px 9px",borderRadius:3,cursor:"pointer",fontSize:13,lineHeight:1}}>↓</button>
+          <button onClick={()=>askConfirm("Import will replace all current data. Continue?",()=>importRef.current?.click())}
+            title="Import backup"
+            style={{background:"rgba(40,60,120,0.18)",border:"1px solid rgba(60,90,160,0.32)",
+              color:"rgba(150,180,240,0.72)",padding:"5px 9px",borderRadius:3,cursor:"pointer",fontSize:13,lineHeight:1}}>↑</button>
+          {[
+            ["task",    "+ task",    "rgba(78,70,145,0.22)","rgba(98,90,172,0.40)","#b2aaea"],
+            ["project","+ project","rgba(45,82,145,0.24)","rgba(55,108,172,0.44)","#92bcec"],
+          ].map(([key,lbl,bg,border,col])=>(
+            <button key={key}
+              onClick={()=>{setShowForm(f=>f===key?null:key);setPopup(null);setEditItem(null);setActiveProj(null);}}
+              style={{background:showForm===key?"rgba(115,30,14,0.22)":bg,
+                border:`1px solid ${showForm===key?"rgba(142,38,18,0.50)":border}`,
+                color:showForm===key?"#d26858":col,
+                padding:"5px 12px",borderRadius:3,cursor:"pointer",fontSize:10,letterSpacing:1,fontFamily:"monospace"}}>
+              {showForm===key?"✕":lbl}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* ── Subtask panel ──────────────────────────────────────────────────── */}
+      {activeProjObj&&(
+        <div style={{position:"absolute",top:isMobile?82:46,left:10,
+          background:"rgba(5,4,22,0.96)",border:"1px solid rgba(82,118,192,0.34)",
+          borderRadius:6,padding:"10px 12px",zIndex:25,
+          maxWidth:isMobile?"calc(100vw - 20px)":"54%",
+          maxHeight:"40vh",overflowY:"auto",
+          boxShadow:"0 2px 22px rgba(0,0,0,0.80)"}}>
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8,flexWrap:"wrap"}}>
+            <span style={{fontFamily:"monospace",fontSize:10,color:"#92bef0",fontWeight:"bold",letterSpacing:1}}>{activeProjObj.name}</span>
+            <span style={{fontFamily:"monospace",fontSize:8,color:"rgba(148,180,232,0.52)"}}>
+              {activeProjObj.subtasks.filter(s=>(s.hp??s.maxHp??1)<=0).length}/{activeProjObj.subtasks.length} done
+            </span>
+            <div style={{flex:1,minWidth:80}}><HpBar hp={projectCurrentHp(activeProjObj)} maxHp={projectMaxHp(activeProjObj)}/></div>
+            <button onClick={()=>{setActiveProj(null);setPopup(null);}}
+              style={{background:"transparent",border:"none",color:"rgba(148,162,222,0.40)",cursor:"pointer",fontSize:11,fontFamily:"monospace"}}>✕</button>
+          </div>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+            {activeProjObj.subtasks.map(st=>{
+              const dead=(st.hp??st.maxHp??1)<=0;
+              const preEvo=BOSS_SPECIES[activeProjObj.type]?.preEvo||"spinarak";
+              const img=spritesRef.current[preEvo];
+              return (
+                <div key={st.id} style={{display:"flex",flexDirection:"column",alignItems:"center",
+                  width:80,padding:"6px 4px",borderRadius:4,
+                  background:dead?"rgba(12,10,30,0.68)":"rgba(10,8,32,0.78)",
+                  border:`1px solid ${dead?"rgba(50,48,88,0.22)":"rgba(90,110,190,0.30)"}`,
+                  opacity:dead?0.45:1}}>
+                  <div style={{width:42,height:42,display:"flex",alignItems:"center",justifyContent:"center"}}>
+                    {img&&img.complete&&img.naturalWidth>0
+                      ? <img src={img.src} style={{width:40,height:40,imageRendering:"pixelated",filter:dead?"grayscale(1) brightness(0.44)":undefined}} alt={preEvo}/>
+                      : <div style={{width:20,height:20,borderRadius:"50%",background:"#5c64a4"}}/>}
+                  </div>
+                  <div style={{fontFamily:"monospace",fontSize:8,color:dead?"#42406c":"#bec8f4",textAlign:"center",marginBottom:3,wordBreak:"break-word"}}>
+                    {st.name.length>9?st.name.slice(0,8)+"…":st.name}
+                  </div>
+                  <HpBar hp={st.hp??st.maxHp??1} maxHp={st.maxHp??1} compact/>
+                  <button
+                    onClick={()=>{
+                      if(!dead) squishAt(activeProjObj.id,preEvo,false);
+                      const nHp2=Math.max(0,(st.hp??st.maxHp??1)-1);
+                      setProjects(prev=>prev.map(p=>p.id!==activeProjObj.id?p:{...p,subtasks:p.subtasks.map(s=>s.id!==st.id?s:{...s,hp:nHp2})}));
+                    }}
+                    disabled={dead}
+                    style={{marginTop:4,background:dead?"rgba(28,26,52,0.38)":"rgba(112,28,14,0.26)",
+                      border:`1px solid ${dead?"rgba(50,48,84,0.24)":"rgba(132,36,18,0.42)"}`,
+                      color:dead?"#303260":"#c86a4a",padding:"3px 6px",borderRadius:3,
+                      cursor:dead?"default":"pointer",fontSize:9,fontFamily:"monospace"}}>
+                    {dead?"done":(st.hp??st.maxHp??1)>1?"-1 hp":"squish"}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* ── Add task form ───────────────────────────────────────────────────── */}
+      {showForm==="task"&&(
+        <div style={{...formStyle,minWidth:isMobile?undefined:320}}>
+          <div style={{display:"flex",gap:9,flexWrap:"wrap",alignItems:"flex-end",marginBottom:10}}>
+            {[
+              {k:"TASK NAME",el:<input autoFocus value={nName} onChange={e=>setNName(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addTask()} placeholder="what needs doing…" style={INP({width:"100%",boxSizing:"border-box",minWidth:120})}/>},
+              {k:"CREATURE", el:<select value={nType} onChange={e=>setNType(e.target.value)} style={INP({width:"100%",boxSizing:"border-box",minWidth:100})}>{Object.entries(SPECIES).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}</select>},
+              {k:"DEADLINE", el:<input type="date" min={todayStr} value={nDate} onChange={e=>setNDate(e.target.value)} style={INP({width:"100%",boxSizing:"border-box",minWidth:110})}/>},
+              {k:"TIME",     el:<input type="time" value={nTime} onChange={e=>setNTime(e.target.value)} style={INP({width:"100%",boxSizing:"border-box",minWidth:80})}/>},
+              {k:"HEALTH",   el:<select value={nHp} onChange={e=>setNHp(Number(e.target.value))} style={INP({width:"100%",boxSizing:"border-box",minWidth:60})}>{[1,2,3,4,5].map(n=><option key={n} value={n}>{n}</option>)}</select>},
+            ].map(({k,el})=><div key={k} style={{display:"flex",flexDirection:"column",flex:"1 1 100px"}}><label style={LBL}>{k}</label>{el}</div>)}
+          </div>
+          <div style={{marginBottom:10}}>
+            <label style={LBL}>NOTES (optional)</label>
+            <textarea value={nNote} onChange={e=>setNNote(e.target.value.slice(0,200))} placeholder="any extra details…" style={{...noteStyle}}/>
+          </div>
+          <button onClick={addTask} disabled={!nName.trim()||!nDate}
+            style={{...BTN(nName.trim()&&nDate?"primary":"neutral"),width:"100%",padding:"7px 0",letterSpacing:1,marginBottom:10,opacity:nName.trim()&&nDate?1:0.4}}>
+            spawn →
+          </button>
+          <div style={{borderTop:"1px solid rgba(98,90,164,0.18)",paddingTop:10}}>
+            <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",userSelect:"none"}}>
+              <input type="checkbox" checked={nRecurring} onChange={e=>setNRecurring(e.target.checked)} style={{accentColor:"#a09ad8",width:13,height:13}}/>
+              <span style={{fontFamily:"monospace",fontSize:9,color:"rgba(188,182,240,0.72)",letterSpacing:1}}>RECURRING TASK</span>
+            </label>
+            {nRecurring&&(
+              <div style={{display:"flex",gap:9,marginTop:8,alignItems:"flex-end",flexWrap:"wrap"}}>
+                <div style={{display:"flex",flexDirection:"column",flex:"1 1 120px"}}>
+                  <label style={LBL}>FREQUENCY</label>
+                  <select value={nFreq} onChange={e=>setNFreq(e.target.value)} style={INP({width:"100%",boxSizing:"border-box"})}>{FREQ_OPTIONS.map(f=><option key={f.value} value={f.value}>{f.label}</option>)}</select>
+                </div>
+                <div style={{display:"flex",flexDirection:"column",flex:"1 1 100px"}}>
+                  <label style={LBL}>OCCURRENCES</label>
+                  <select value={nCount} onChange={e=>setNCount(e.target.value)} style={INP({width:"100%",boxSizing:"border-box"})}>{countOptions.map(c=><option key={c} value={c}>{c==="infinite"?"∞ infinite":c}</option>)}</select>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Add project form ────────────────────────────────────────────────── */}
+      {showForm==="project"&&(
+        <div style={{...formStyle,minWidth:isMobile?undefined:340}}>
+          <div style={{fontFamily:"monospace",fontSize:9,color:"rgba(128,168,222,0.58)",marginBottom:10,letterSpacing:2}}>NEW PROJECT</div>
+          <div style={{display:"flex",gap:9,flexWrap:"wrap",marginBottom:10}}>
+            {[
+              {k:"PROJECT NAME",el:<input autoFocus value={pName} onChange={e=>setPName(e.target.value)} placeholder="project name…" style={INP({width:"100%",boxSizing:"border-box",minWidth:120})}/>},
+              {k:"BOSS",        el:<select value={pType} onChange={e=>setPType(e.target.value)} style={INP({width:"100%",boxSizing:"border-box",minWidth:130})}>{Object.keys(BOSS_SPECIES).map(k=><option key={k} value={k}>{bossLabel(k)}</option>)}</select>},
+              {k:"DEADLINE",    el:<input type="date" min={todayStr} value={pDate} onChange={e=>setPDate(e.target.value)} style={INP({width:"100%",boxSizing:"border-box",minWidth:110})}/>},
+              {k:"TIME",        el:<input type="time" value={pTime} onChange={e=>setPTime(e.target.value)} style={INP({width:"100%",boxSizing:"border-box",minWidth:80})}/>},
+            ].map(({k,el})=><div key={k} style={{display:"flex",flexDirection:"column",flex:"1 1 100px"}}><label style={LBL}>{k}</label>{el}</div>)}
+          </div>
+          <div style={{fontFamily:"monospace",fontSize:8,color:"rgba(128,168,222,0.50)",marginBottom:6,letterSpacing:1}}>SUBTASKS</div>
+          {pSubtasks.map((st,i)=>(
+            <div key={i} style={{display:"flex",gap:6,alignItems:"center",marginBottom:5}}>
+              <input value={st.name} onChange={e=>{const a=[...pSubtasks];a[i]={...a[i],name:e.target.value};setPSubtasks(a);}} placeholder={`subtask ${i+1}…`} style={INP({flex:1,minWidth:80})}/>
+              <select value={st.maxHp} onChange={e=>{const a=[...pSubtasks];a[i]={...a[i],maxHp:Number(e.target.value)};setPSubtasks(a);}} style={INP({width:60})}>{[1,2,3,4,5].map(n=><option key={n} value={n}>{n}hp</option>)}</select>
+              {pSubtasks.length>1&&<button onClick={()=>setPSubtasks(pSubtasks.filter((_,j)=>j!==i))} style={{background:"transparent",border:"none",color:"rgba(188,84,64,0.68)",cursor:"pointer",fontSize:13,padding:"0 4px"}}>✕</button>}
+            </div>
+          ))}
+          <button onClick={()=>setPSubtasks([...pSubtasks,{name:"",maxHp:1}])}
+            style={{...BTN("neutral"),width:"100%",padding:"5px 0",marginBottom:10,fontSize:9}}>+ add subtask</button>
+          <button onClick={addProject} disabled={!pName.trim()||!pDate||!pSubtasks.some(s=>s.name.trim())}
+            style={{...BTN("primary"),width:"100%",padding:"7px 0",letterSpacing:1,
+              opacity:pName.trim()&&pDate&&pSubtasks.some(s=>s.name.trim())?1:0.4}}>spawn project →</button>
+        </div>
+      )}
+
+      {/* ── Task popup ──────────────────────────────────────────────────────── */}
+      {popup?.kind==="task"&&selTask&&!editItem&&(
+        <PopCard>
+          <div style={{fontFamily:"monospace",fontSize:9,color:speciesColor(selTask.type).text,marginBottom:2,letterSpacing:1,opacity:0.7}}>{SPECIES[selTask.type]?.label}</div>
+          <div style={{fontFamily:"monospace",fontSize:12,color:"#d2ccff",marginBottom:2,fontWeight:"bold"}}>{selTask.name}</div>
+          <div style={{fontFamily:"monospace",fontSize:9,color:selTask.deadline-Date.now()<=0?"rgba(255,120,100,0.80)":"rgba(178,172,232,0.55)",marginBottom:6}}>{formatCountdown(selTask.deadline-Date.now())}</div>
+          {selTask.note&&<div style={{fontFamily:"monospace",fontSize:9,color:"rgba(170,165,220,0.65)",marginBottom:8,lineHeight:1.5,borderLeft:"2px solid rgba(120,112,190,0.30)",paddingLeft:8}}>{selTask.note}</div>}
+          {(selTask.maxHp??1)>1&&<HpBar hp={selTask.hp??selTask.maxHp??1} maxHp={selTask.maxHp??1}/>}
+          <div style={{display:"flex",gap:6,marginBottom:6}}>
+            <button onClick={()=>{const d=new Date(selTask.deadline);setEditItem({kind:"task",...selTask,date:d.toISOString().split("T")[0],time:`${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`,maxHp:selTask.maxHp??1,hp:selTask.hp??selTask.maxHp??1,note:selTask.note??"",});}} style={{...BTN("primary"),flex:1}}>✎ edit</button>
+            <button onClick={()=>{const cur=selTask.hp??selTask.maxHp??1,nx=cur-1;squishAt(selTask.id,selTask.type,false);if(nx<=0)removeTask(selTask.id);else{setTasks(p=>p.map(t=>t.id===selTask.id?{...t,hp:nx}:t));setPopup(null);}}} style={{...BTN("danger"),flex:1}}>{(selTask.hp??selTask.maxHp??1)>1?"✕ -1 hp":"✕ squish"}</button>
+          </div>
+          <button onClick={()=>askConfirm("Remove this task permanently?",()=>removeTask(selTask.id))} style={{...BTN("danger"),width:"100%",marginBottom:4,fontSize:9}}>🗑 remove task</button>
+          <button onClick={()=>setPopup(null)} style={{width:"100%",background:"transparent",border:"none",color:"rgba(132,124,192,0.30)",cursor:"pointer",fontSize:9,fontFamily:"monospace"}}>dismiss</button>
+        </PopCard>
+      )}
+
+      {/* ── Recurring popup ──────────────────────────────────────────────────── */}
+      {popup?.kind==="recurring"&&selRecI&&selRecT&&!editItem&&(
+        <PopCard>
+          <div style={{fontFamily:"monospace",fontSize:9,color:speciesColor(selRecI.type).text,marginBottom:2,letterSpacing:1,opacity:0.7}}>
+            {SPECIES[selRecI.type]?.label} · recurring{selRecT.paused&&<span style={{marginLeft:6,color:"rgba(210,160,50,0.80)"}}>⏸</span>}
+          </div>
+          <div style={{fontFamily:"monospace",fontSize:12,color:"#d2ccff",marginBottom:2,fontWeight:"bold"}}>{selRecI.name}</div>
+          <div style={{fontFamily:"monospace",fontSize:9,color:selRecI.deadline-Date.now()<=0?"rgba(255,120,100,0.80)":"rgba(178,172,232,0.55)",marginBottom:2}}>{formatCountdown(selRecI.deadline-Date.now())}</div>
+          <div style={{fontFamily:"monospace",fontSize:8,color:"rgba(158,150,218,0.40)",marginBottom:selRecT.note?4:6,display:"flex",alignItems:"center",gap:10}}>
+            <span>occ. {selRecI.occIdx+1}{selRecT.count!=="infinite"?` of ${selRecT.count}`:""} · {FREQ_OPTIONS.find(f=>f.value===selRecT.freq)?.label}</span>
+            {(streaks[selRecT.id]??0)>0&&<span style={{color:"rgba(255,200,60,0.75)"}}>🔥 {streaks[selRecT.id]}</span>}
+          </div>
+          {selRecT.note&&<div style={{fontFamily:"monospace",fontSize:9,color:"rgba(170,165,220,0.65)",marginBottom:8,lineHeight:1.5,borderLeft:"2px solid rgba(120,112,190,0.30)",paddingLeft:8}}>{selRecT.note}</div>}
+          {(selRecI.maxHp??1)>1&&<HpBar hp={selRecI.hp??selRecI.maxHp??1} maxHp={selRecI.maxHp??1}/>}
+          <div style={{display:"flex",gap:6,marginBottom:6}}>
+            <button onClick={()=>{const d=new Date(selRecT.startDeadline);setEditItem({kind:"recurring",id:selRecT.id,name:selRecT.name,type:selRecT.type,maxHp:selRecT.maxHp,freq:selRecT.freq,count:selRecT.count,note:selRecT.note??"",date:d.toISOString().split("T")[0],time:`${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`,});}} style={{...BTN("primary"),flex:1}}>✎ edit series</button>
+            <button onClick={()=>{
+              squishAt(selRecI.id,selRecI.type,false);
+              const key=`${selRecI.templateId}:${selRecI.occIdx}`,cur=selRecI.hp??selRecI.maxHp??1,nx=cur-1;
+              setRecurringHp(p=>({...p,[key]:Math.max(0,nx)}));
+              if(nx<=0){const onTime=selRecI.deadline>Date.now();setStreaks(p=>({...p,[selRecI.templateId]:onTime?(p[selRecI.templateId]??0)+1:0}));}
+              setPopup(null);
+            }} style={{...BTN("danger"),flex:1}}>{(selRecI.hp??selRecI.maxHp??1)>1?"✕ -1 hp":"✕ squish"}</button>
+          </div>
+          <button onClick={()=>setRecurringTemplates(p=>p.map(t=>t.id===selRecT.id?{...t,paused:!t.paused}:t))} style={{...BTN("warn"),width:"100%",marginBottom:6,fontSize:9}}>{selRecT.paused?"▶ resume series":"⏸ pause series"}</button>
+          <button onClick={()=>askConfirm("Skip this occurrence? Won't count toward your streak.",()=>{
+            const key=`${selRecI.templateId}:${selRecI.occIdx}`;
+            setRecurringHp(p=>({...p,[key]:0}));
+            cleanupRefs(selRecI.id); setPopup(null);
+          })} style={{...BTN("neutral"),width:"100%",marginBottom:6,fontSize:9}}>⏭ skip this occurrence</button>
+          <button onClick={()=>askConfirm("Remove this entire recurring series?",()=>removeRecurringSeries(selRecT.id))} style={{...BTN("danger"),width:"100%",marginBottom:4,fontSize:9}}>🗑 remove entire series</button>
+          <button onClick={()=>setPopup(null)} style={{width:"100%",background:"transparent",border:"none",color:"rgba(132,124,192,0.30)",cursor:"pointer",fontSize:9,fontFamily:"monospace"}}>dismiss</button>
+        </PopCard>
+      )}
+
+      {/* ── Project popup ───────────────────────────────────────────────────── */}
+      {popup?.kind==="project"&&selProj&&!editItem&&(
+        <PopCard>
+          <div style={{fontFamily:"monospace",fontSize:9,color:speciesColor(selProj.type).text,marginBottom:2,letterSpacing:1,opacity:0.7}}>{BOSS_SPECIES[selProj.type]?.label} · project</div>
+          <div style={{fontFamily:"monospace",fontSize:12,color:"#aecef4",marginBottom:2,fontWeight:"bold"}}>{selProj.name}</div>
+          <div style={{fontFamily:"monospace",fontSize:9,color:selProj.deadline-Date.now()<=0?"rgba(255,120,100,0.80)":"rgba(148,180,232,0.52)",marginBottom:6}}>{formatCountdown(selProj.deadline-Date.now())}</div>
+          <HpBar hp={projectCurrentHp(selProj)} maxHp={projectMaxHp(selProj)}/>
+          <div style={{fontFamily:"monospace",fontSize:8,color:"rgba(148,180,232,0.50)",marginBottom:8}}>{selProj.subtasks.filter(s=>(s.hp??s.maxHp??1)<=0).length}/{selProj.subtasks.length} subtasks done</div>
+          <div style={{display:"flex",gap:6,marginBottom:6}}>
+            <button onClick={()=>{const d=new Date(selProj.deadline);setEditItem({kind:"project",...selProj,date:d.toISOString().split("T")[0],time:`${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`,});}} style={{...BTN("primary"),flex:1}}>✎ edit</button>
+            {projectAllDead(selProj)&&<button onClick={()=>{squishAt(selProj.id,selProj.type,true);removeProject(selProj.id);}} style={{...BTN("danger"),flex:1}}>💥 squish boss</button>}
+          </div>
+          <button onClick={()=>askConfirm("Remove this project permanently?",()=>removeProject(selProj.id))} style={{...BTN("danger"),width:"100%",marginBottom:4,fontSize:9}}>🗑 remove project</button>
+          <button onClick={()=>setPopup(null)} style={{width:"100%",background:"transparent",border:"none",color:"rgba(132,124,192,0.30)",cursor:"pointer",fontSize:9,fontFamily:"monospace"}}>dismiss</button>
+        </PopCard>
+      )}
+
+      {/* ── Edit modal — centered, always fully visible, explicit close only ── */}
+      {editItem&&(
+        <div style={{position:"fixed",inset:0,zIndex:32,display:"flex",alignItems:"center",justifyContent:"center",background:"rgba(0,0,0,0.45)"}}>
+          <div onClick={e=>e.stopPropagation()} style={{
+            background:"rgba(5,4,22,0.98)", border:"1px solid rgba(112,104,178,0.34)",
+            borderRadius:6, padding:"13px 15px", zIndex:33,
+            width:isMobile?"calc(100vw - 16px)":242,
+            maxHeight:"88vh", overflowY:"auto",
+            boxShadow:"0 2px 30px rgba(0,0,0,0.90), 0 0 14px rgba(112,104,205,0.18)",
+          }}>
+          <div style={{fontFamily:"monospace",fontSize:8,color:"rgba(158,150,218,0.42)",marginBottom:10,letterSpacing:2}}>
+            EDIT {editItem.kind==="task"?"TASK":editItem.kind==="recurring"?"RECURRING SERIES":"PROJECT"}
+          </div>
+          <Field label="NAME"><input autoFocus value={editItem.name} onChange={e=>setEditItem(t=>({...t,name:e.target.value}))} style={INP({width:"100%",boxSizing:"border-box"})}/></Field>
+          {editItem.kind!=="project"&&<Field label="CREATURE"><select value={editItem.type} onChange={e=>setEditItem(t=>({...t,type:e.target.value}))} style={INP({width:"100%",boxSizing:"border-box"})}>{Object.entries(SPECIES).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}</select></Field>}
+          {editItem.kind==="project"&&<Field label="BOSS"><select value={editItem.type} onChange={e=>setEditItem(t=>({...t,type:e.target.value}))} style={INP({width:"100%",boxSizing:"border-box"})}>{Object.keys(BOSS_SPECIES).map(k=><option key={k} value={k}>{bossLabel(k)}</option>)}</select></Field>}
+          {editItem.kind==="recurring"&&<>
+            <Field label="FREQUENCY"><select value={editItem.freq} onChange={e=>setEditItem(t=>({...t,freq:e.target.value}))} style={INP({width:"100%",boxSizing:"border-box"})}>{FREQ_OPTIONS.map(f=><option key={f.value} value={f.value}>{f.label}</option>)}</select></Field>
+            <Field label="OCCURRENCES"><select value={editItem.count} onChange={e=>setEditItem(t=>({...t,count:e.target.value}))} style={INP({width:"100%",boxSizing:"border-box"})}>{countOptions.map(c=><option key={c} value={c}>{c==="infinite"?"∞ infinite":c}</option>)}</select></Field>
+            <Field label="MAX HEALTH"><select value={editItem.maxHp??1} onChange={e=>setEditItem(t=>({...t,maxHp:Number(e.target.value)}))} style={INP({width:"100%",boxSizing:"border-box"})}>{[1,2,3,4,5].map(n=><option key={n} value={n}>{n}</option>)}</select></Field>
+          </>}
+          <Field label="DEADLINE"><input type="date" value={editItem.date} onChange={e=>setEditItem(t=>({...t,date:e.target.value}))} style={INP({width:"100%",boxSizing:"border-box"})}/></Field>
+          <Field label="TIME"><input type="time" value={editItem.time} onChange={e=>setEditItem(t=>({...t,time:e.target.value}))} style={INP({width:"100%",boxSizing:"border-box"})}/></Field>
+          {editItem.kind==="task"&&<>
+            <Field label="MAX HEALTH"><select value={editItem.maxHp??1} onChange={e=>{const v=Number(e.target.value);setEditItem(t=>({...t,maxHp:v,hp:Math.min(t.hp??v,v)}));}} style={INP({width:"100%",boxSizing:"border-box"})}>{[1,2,3,4,5].map(n=><option key={n} value={n}>{n}</option>)}</select></Field>
+            <Field label="CURRENT HEALTH"><select value={editItem.hp??editItem.maxHp??1} onChange={e=>setEditItem(t=>({...t,hp:Number(e.target.value)}))} style={INP({width:"100%",boxSizing:"border-box"})}>{Array.from({length:(editItem.maxHp??1)+1},(_,i)=>i).map(n=><option key={n} value={n}>{n}</option>)}</select></Field>
+          </>}
+          {(editItem.kind==="task"||editItem.kind==="recurring")&&(
+            <Field label="NOTES (optional)">
+              <textarea value={editItem.note??""} onChange={e=>setEditItem(t=>({...t,note:e.target.value.slice(0,200)}))} style={{...noteStyle}}/>
+            </Field>
+          )}
+          {editItem.kind==="project"&&<>
+            <div style={{fontFamily:"monospace",fontSize:8,color:"rgba(128,168,222,0.50)",marginBottom:6,marginTop:4,letterSpacing:1}}>SUBTASKS</div>
+            {(editItem.subtasks||[]).map((st,i)=>(
+              <div key={st.id||i} style={{display:"flex",gap:5,alignItems:"center",marginBottom:5}}>
+                <input value={st.name} onChange={e=>{const a=[...editItem.subtasks];a[i]={...a[i],name:e.target.value};setEditItem(t=>({...t,subtasks:a}));}} style={INP({flex:1,minWidth:60,fontSize:10})}/>
+                <select value={st.maxHp??1} onChange={e=>{const a=[...editItem.subtasks];const v=Number(e.target.value);a[i]={...a[i],maxHp:v,hp:Math.min(a[i].hp??v,v)};setEditItem(t=>({...t,subtasks:a}));}} style={INP({width:55,fontSize:10})}>{[1,2,3,4,5].map(n=><option key={n} value={n}>{n}hp</option>)}</select>
+                <select value={st.hp??st.maxHp??1} onChange={e=>{const a=[...editItem.subtasks];a[i]={...a[i],hp:Number(e.target.value)};setEditItem(t=>({...t,subtasks:a}));}} style={INP({width:55,fontSize:10})}>{Array.from({length:(st.maxHp??1)+1},(_,j)=>j).map(n=><option key={n} value={n}>{n}</option>)}</select>
+                <button onClick={()=>setEditItem(t=>({...t,subtasks:t.subtasks.filter((_,j)=>j!==i)}))} style={{background:"transparent",border:"none",color:"rgba(188,84,64,0.68)",cursor:"pointer",fontSize:13,padding:"0 3px"}}>✕</button>
+              </div>
+            ))}
+            <button onClick={()=>setEditItem(t=>({...t,subtasks:[...t.subtasks,{id:`st_${Date.now()}`,name:"",maxHp:1,hp:1}]}))} style={{...BTN("neutral"),width:"100%",padding:"4px 0",marginBottom:8,fontSize:9}}>+ add subtask</button>
+          </>}
+          <div style={{display:"flex",gap:6,marginTop:4}}>
+            <button onClick={saveEdit} style={{...BTN("primary"),flex:1}}>save</button>
+            <button onClick={()=>setEditItem(null)} style={{...BTN("neutral"),flex:1}}>cancel</button>
+          </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Info overlay ────────────────────────────────────────────────────── */}
+      {showInfo&&(
+        <div style={{position:"fixed",inset:0,zIndex:60,display:"flex",alignItems:"center",justifyContent:"center",background:"rgba(0,0,0,0.75)"}}
+          onClick={()=>setShowInfo(false)}>
+          <div onClick={e=>e.stopPropagation()} style={{
+            background:"rgba(6,4,22,0.98)",border:"1px solid rgba(112,104,178,0.38)",
+            borderRadius:10,padding:"22px 24px",maxWidth:500,width:"calc(100vw - 28px)",
+            maxHeight:"88vh",overflowY:"auto",
+            boxShadow:"0 4px 40px rgba(0,0,0,0.88), 0 0 24px rgba(110,100,200,0.18)",
+          }}>
+
+            {/* ── Header ── */}
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:4}}>
+              <div style={{display:"flex",alignItems:"center",gap:10}}>
+                <svg width="20" height="20" viewBox="0 0 22 22">
+                  <circle cx="11" cy="11" r="2.2" fill="rgba(195,245,240,0.96)"/>
+                  {[0,1,2,3,4,5,6,7].map(i=>{const a=(i/8)*Math.PI*2-Math.PI/2;return<line key={i} x1="11" y1="11" x2={11+Math.cos(a)*10} y2={11+Math.sin(a)*10} stroke="rgba(218,210,178,0.45)" strokeWidth="0.9"/>;  })}
+                  {[0.38,0.65,0.92].map((f,i)=><circle key={i} cx="11" cy="11" r={f*10} fill="none" stroke={`rgba(218,210,178,${0.15+i*0.08})`} strokeWidth="0.8"/>)}
+                </svg>
+                <span style={{fontFamily:"monospace",fontSize:15,color:"#d0c8ff",fontWeight:"bold",letterSpacing:2}}>Pokémon Silk</span>
+              </div>
+              <button onClick={()=>setShowInfo(false)} style={{background:"transparent",border:"none",color:"rgba(160,152,220,0.45)",cursor:"pointer",fontSize:18,lineHeight:1,padding:"0 2px"}}>✕</button>
+            </div>
+            <div style={{fontFamily:"monospace",fontSize:9,color:"rgba(180,172,240,0.45)",marginBottom:18,letterSpacing:1}}>v3 · fan project by Aditya Koneru</div>
+
+            {/* ── Opening hook ── */}
+            <div style={{fontFamily:"monospace",fontSize:10,color:"rgba(215,210,255,0.92)",lineHeight:2.0,marginBottom:22,padding:"14px 16px",background:"rgba(80,60,180,0.13)",borderRadius:7,border:"1px solid rgba(120,100,210,0.24)"}}>
+              Pokémon Silk is a <span style={{color:"#c8beff",fontWeight:"bold"}}>visual to-do list</span> where every task becomes a spider Pokémon creeping toward the center of a glowing web — the closer it gets, the sooner the deadline. Tasks have <span style={{color:"#e8c840",fontWeight:"bold"}}>health points</span> and take multiple hits to squish. Big multi-step projects spawn as <span style={{color:"#f0a060",fontWeight:"bold"}}>evolved boss Pokémon</span> with subtasks you chip away at one by one. Set up <span style={{color:"#78cce0",fontWeight:"bold"}}>recurring tasks</span> that auto-populate the web on schedule and track your 🔥 streak for consistency. The web has <span style={{color:"#c0b8f0",fontWeight:"bold"}}>four deadline zones</span> — spiders accelerate as they close in — and anything you miss goes <span style={{color:"#ff7060",fontWeight:"bold"}}>overdue</span> and pulses red at the center, staring at you. Everything saves automatically. No account. No cloud. Just you and your spiders.
+              <br/><br/>
+              It's a productivity app. We promise.
+            </div>
+
+            {/* ── Section 1: The Web ── */}
+            <div style={{fontFamily:"monospace",fontSize:9,color:"rgba(120,204,224,0.75)",letterSpacing:1.5,marginBottom:10}}>① THE WEB — YOUR ANXIETY DASHBOARD</div>
+            <div style={{fontFamily:"monospace",fontSize:9,color:"rgba(205,200,255,0.78)",lineHeight:1.85,marginBottom:10}}>
+              Three faint dashed rings divide the web into <span style={{color:"#78cce0",fontWeight:"bold"}}>deadline zones</span>. Spiders spawn at the outer edge and creep inward over time:
+            </div>
+            <div style={{display:"flex",gap:8,marginBottom:10,flexWrap:"wrap"}}>
+              {[
+                {label:"outer edge", time:"30–90 days out", col:"rgba(100,222,192,0.85)"},
+                {label:"middle zone",time:"7–30 days out",  col:"rgba(120,182,255,0.85)"},
+                {label:"inner zone", time:"1–7 days out",   col:"rgba(210,162,255,0.85)"},
+                {label:"danger zone",time:"last 24 hours",  col:"rgba(255,110,90,0.85)"},
+              ].map(({label,time,col})=>(
+                <div key={label} style={{flex:"1 1 100px",padding:"7px 9px",background:"rgba(20,16,50,0.60)",borderRadius:5,border:`1px solid ${col.replace("0.85","0.22")}`}}>
+                  <div style={{fontFamily:"monospace",fontSize:8,color:col,marginBottom:2,fontWeight:"bold"}}>{label}</div>
+                  <div style={{fontFamily:"monospace",fontSize:8,color:"rgba(185,180,235,0.62)"}}>{time}</div>
+                </div>
+              ))}
+            </div>
+            <div style={{fontFamily:"monospace",fontSize:9,color:"rgba(205,200,255,0.78)",lineHeight:1.85,marginBottom:20}}>
+              Inside that last 24h ring, spiders <span style={{color:"#ff9060",fontWeight:"bold"}}>accelerate sharply</span>. Anything that hits zero goes <span style={{color:"#ff7060",fontWeight:"bold"}}>OVERDUE</span> — it parks at the center, pulses red, and refuses to leave until you deal with it. The <span style={{color:"rgba(255,120,90,0.95)",fontWeight:"bold"}}>💀 squish overdue</span> button in the header will detonate all of them at once when you're done feeling bad about yourself.
+            </div>
+
+            {/* ── Section 2: Meet the Crew ── */}
+            <div style={{fontFamily:"monospace",fontSize:9,color:"rgba(232,200,64,0.75)",letterSpacing:1.5,marginBottom:10}}>② MEET THE CREW</div>
+            <div style={{fontFamily:"monospace",fontSize:9,color:"rgba(205,200,255,0.78)",lineHeight:1.85,marginBottom:12}}>
+              Six spider Pokémon live on your web — three for tasks, three for projects. The task species are <span style={{color:"#a8d868",fontWeight:"bold"}}>entirely yours to categorise</span>: work vs personal vs home, urgent vs chill vs "I'll do it eventually," or just vibes. No rules. The bosses are their evolved forms — same colour, bigger energy, breathing slowly while your deadline approaches.
+            </div>
+            <div style={{fontFamily:"monospace",fontSize:8,color:"rgba(168,216,104,0.50)",letterSpacing:1,marginBottom:7}}>TASKS</div>
+            <div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap"}}>
+              {[
+                {key:"spinarak",name:"Spinarak",col:SPECIES_COLOR.spinarak,desc:"Nimble. Slightly sinister. Gets things done."},
+                {key:"joltik",  name:"Joltik",  col:SPECIES_COLOR.joltik,  desc:"Tiny and electric. The tasks that sneak up on you."},
+                {key:"dewpider",name:"Dewpider", col:SPECIES_COLOR.dewpider,desc:"Chill exterior. Absolutely not fine."},
+              ].map(({key,name,col,desc})=>(
+                <div key={key} style={{flex:"1 1 120px",padding:"10px 8px",background:col.pill,border:`1px solid ${col.border}`,borderRadius:6,display:"flex",flexDirection:"column",alignItems:"center",gap:5}}>
+                  <img src={spriteUrls(key)[0]} alt={name} style={{width:46,height:46,imageRendering:"pixelated"}} onError={e=>{e.target.src=spriteUrls(key)[1];}}/>
+                  <div style={{fontFamily:"monospace",fontSize:10,color:col.text,fontWeight:"bold"}}>{name}</div>
+                  <div style={{fontFamily:"monospace",fontSize:8,color:"rgba(210,205,255,0.62)",textAlign:"center",lineHeight:1.5}}>{desc}</div>
+                </div>
+              ))}
+            </div>
+            <div style={{fontFamily:"monospace",fontSize:8,color:"rgba(232,200,64,0.50)",letterSpacing:1,marginBottom:7}}>PROJECT BOSSES</div>
+            <div style={{display:"flex",gap:8,marginBottom:20,flexWrap:"wrap"}}>
+              {[
+                {key:"ariados",   name:"Ariados",   col:SPECIES_COLOR.spinarak,desc:"Spinarak, but it's been stewing for weeks."},
+                {key:"galvantula",name:"Galvantula", col:SPECIES_COLOR.joltik,  desc:"Joltik's final form. More legs. More problems."},
+                {key:"araquanid", name:"Araquanid",  col:SPECIES_COLOR.dewpider,desc:"Dewpider finally grew up. Now it's your boss."},
+              ].map(({key,name,col,desc})=>(
+                <div key={key} style={{flex:"1 1 120px",padding:"10px 8px",background:col.pill,border:`1px solid ${col.border}`,borderRadius:6,display:"flex",flexDirection:"column",alignItems:"center",gap:5,opacity:0.88}}>
+                  <img src={spriteUrls(key)[0]} alt={name} style={{width:46,height:46,imageRendering:"pixelated"}} onError={e=>{e.target.src=spriteUrls(key)[1];}}/>
+                  <div style={{fontFamily:"monospace",fontSize:10,color:col.text,fontWeight:"bold"}}>{name}</div>
+                  <div style={{fontFamily:"monospace",fontSize:8,color:"rgba(210,205,255,0.62)",textAlign:"center",lineHeight:1.5}}>{desc}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* ── Section 3: Tasks ── */}
+            <div style={{fontFamily:"monospace",fontSize:9,color:"rgba(168,216,104,0.75)",letterSpacing:1.5,marginBottom:10}}>③ TASKS — THE BASICS</div>
+            <div style={{fontFamily:"monospace",fontSize:9,color:"rgba(205,200,255,0.78)",lineHeight:1.85,marginBottom:20}}>
+              Hit <span style={{color:"#b2aaea",fontWeight:"bold"}}>+ task</span>, give it a name, pick a creature, set a deadline. Optional: add <span style={{color:"#f0c080",fontWeight:"bold"}}>health points</span> (1–5 hits before it dies — great for tasks needing multiple rounds of work), and a <span style={{color:"#b2aaea",fontWeight:"bold"}}>note</span> for any extra context. Hit <span style={{color:"#b2aaea",fontWeight:"bold"}}>spawn →</span> and watch it crawl onto the web. <span style={{color:"#e8c840",fontWeight:"bold"}}>Tap any spider</span> to open its menu: squish it, deal damage, edit it, or remove it. The label below each spider shows the name, countdown, and HP — you always know where things stand at a glance.
+            </div>
+
+            {/* ── Section 4: Projects ── */}
+            <div style={{fontFamily:"monospace",fontSize:9,color:"rgba(255,160,100,0.75)",letterSpacing:1.5,marginBottom:10}}>④ PROJECTS — BOSS FIGHTS</div>
+            <div style={{fontFamily:"monospace",fontSize:9,color:"rgba(205,200,255,0.78)",lineHeight:1.85,marginBottom:20}}>
+              Hit <span style={{color:"#92bcec",fontWeight:"bold"}}>+ project</span> for multi-step work. Pick your boss, add subtasks each with their own HP, set a deadline. The boss's HP bar on the web is the sum of all subtasks — tap it to open a subtask panel and chip away at each one. When every subtask hits zero, you unlock <span style={{color:"#d26858",fontWeight:"bold"}}>💥 squish boss</span>. It explodes more dramatically than a regular task. You've earned it.
+            </div>
+
+            {/* ── Section 5: Recurring Tasks ── */}
+            <div style={{fontFamily:"monospace",fontSize:9,color:"rgba(120,204,224,0.75)",letterSpacing:1.5,marginBottom:10}}>⑤ RECURRING TASKS</div>
+            <div style={{fontFamily:"monospace",fontSize:9,color:"rgba(205,200,255,0.78)",lineHeight:1.85,marginBottom:20}}>
+              Tick <span style={{color:"#78cce0",fontWeight:"bold"}}>Recurring</span> when creating a task. Set frequency (daily → monthly) and how many times — or <span style={{color:"#78cce0",fontWeight:"bold"}}>∞ forever</span> for the things in life that never end (laundry, gym, that report). All upcoming occurrences within 30 days appear on the web simultaneously. Their labels show the cadence — <span style={{color:"#78cce0"}}>(weekly)</span>, <span style={{color:"#78cce0"}}>(daily)</span> — so you always know what you're looking at. Squish on time → <span style={{color:"#ffcc30",fontWeight:"bold"}}>🔥 streak grows</span>. Miss the deadline → streak resets, shame intensifies. From the popup you can <span style={{color:"#d4a030",fontWeight:"bold"}}>⏸ pause</span> a whole series, <span style={{color:"#b2aaea",fontWeight:"bold"}}>⏭ skip</span> one occurrence without penalty, or delete the series entirely.
+            </div>
+
+            {/* ── Section 6: Saving ── */}
+            <div style={{fontFamily:"monospace",fontSize:9,color:"rgba(192,184,240,0.75)",letterSpacing:1.5,marginBottom:10}}>⑥ SAVING & SYNCING</div>
+            <div style={{fontFamily:"monospace",fontSize:9,color:"rgba(205,200,255,0.78)",lineHeight:1.85,marginBottom:20}}>
+              Saves to <span style={{color:"#c0b8f0",fontWeight:"bold"}}>this browser on this device</span>, silently, every time something changes. No account, no login, no drama. To move your web to another device: <span style={{color:"#96b4f0",fontWeight:"bold"}}>↓ Export</span> a backup file, then <span style={{color:"#96b4f0",fontWeight:"bold"}}>↑ Import</span> it on the new device. Keep that file somewhere safe — clearing your browser data without a backup means starting fresh.
+            </div>
+
+            {/* ── Section 7: Secrets ── */}
+            <div style={{fontFamily:"monospace",fontSize:9,color:"rgba(255,200,80,0.75)",letterSpacing:1.5,marginBottom:10}}>⑦ LITTLE DETAILS WORTH KNOWING</div>
+            <div style={{display:"flex",flexDirection:"column",gap:7,marginBottom:20}}>
+              {[
+                {e:"🌐", t:"Tap empty space outside the web", d:"shoots a silk strand toward the web. Satisfying for no reason whatsoever."},
+                {e:"💧", t:"Tap anywhere on the web", d:"sends a ripple outward from where you touched. Same deal."},
+                {e:"💥", t:"Squish explosions leave splatter marks", d:"that slowly fade on the web. Boss squishes are extra dramatic."},
+                {e:"🕷️", t:"Spiders bob, wiggle, and idle", d:"each one alive in its own small way. The web sways gently too."},
+                {e:"✨", t:"The sky is genuinely unhinged", d:"shooting stars, drifting fireflies, six aurora bands, a moon with actual craters. We got carried away. No regrets."},
+              ].map(({e,t,d})=>(
+                <div key={t} style={{display:"flex",gap:8,alignItems:"flex-start",padding:"8px 10px",background:"rgba(30,20,60,0.45)",borderRadius:5,border:"1px solid rgba(80,70,140,0.22)"}}>
+                  <span style={{fontSize:14,flexShrink:0,marginTop:1}}>{e}</span>
+                  <div style={{fontFamily:"monospace",fontSize:9,color:"rgba(205,200,255,0.75)",lineHeight:1.65}}><span style={{color:"rgba(225,220,255,0.92)",fontWeight:"bold"}}>{t}</span> — {d}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* ── Footer ── */}
+            <div style={{paddingTop:12,borderTop:"1px solid rgba(90,80,160,0.18)",fontFamily:"monospace",fontSize:7,color:"rgba(140,134,200,0.35)",lineHeight:1.8,textAlign:"center"}}>
+              Pokémon & sprites © Nintendo / Game Freak · Pokémon Silk is a fan project and is not affiliated with or endorsed by Nintendo
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Credits ─────────────────────────────────────────────────────────── */}
+      <div style={{position:"absolute",bottom:8,right:12,textAlign:"right",fontFamily:"monospace",lineHeight:1.7}}>
+        <div style={{fontSize:8,color:"rgba(198,192,252,0.52)",letterSpacing:0.5}}>
+          Pokémon Silk v3 · a fan project by <span style={{color:"rgba(218,212,255,0.72)"}}>Aditya Koneru</span>
+        </div>
+        <div style={{fontSize:7,color:"rgba(158,152,222,0.32)",letterSpacing:0.4}}>
+          Pokémon & sprites © Nintendo / Game Freak · not affiliated
+        </div>
+      </div>
+    </div>
+  );
+}
+
+    // Mount the app
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(React.createElement(PokemonSilk));
+  </script>
+</body>
+</html>
