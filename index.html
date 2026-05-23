@@ -1088,7 +1088,7 @@ function PokemonSilk(){
     const PAD=8, H=280; // popup card height (edit is now a centered modal, not here)
     const below=popup.y+36;
     const above=popup.y-H-8;
-    const headerH=isMobile?82:46;
+    const headerH=isMobile?90:52;
     if(below+H>window.innerHeight-PAD && above>headerH) return above;
     return Math.max(headerH+PAD, Math.min(below, window.innerHeight-H-PAD));
   })():0;
@@ -1111,7 +1111,7 @@ function PokemonSilk(){
     </div>
   );
   const formStyle={
-    position:"absolute",top:isMobile?82:46,left:"50%",transform:"translateX(-50%)",
+    position:"absolute",top:isMobile?90:52,left:"50%",transform:"translateX(-50%)",
     background:"rgba(5,4,22,0.97)", border:"1px solid rgba(98,90,164,0.30)",
     borderRadius:5, padding:"14px 16px", zIndex:20,
     boxShadow:"0 2px 28px rgba(0,0,0,0.86)",
@@ -1139,64 +1139,81 @@ function PokemonSilk(){
       <input ref={importRef} type="file" accept=".json" onChange={importData} style={{display:"none"}}/>
 
       {/* ── Header ─────────────────────────────────────────────────────────── */}
-      <div style={{position:"absolute",top:0,left:0,right:0,padding:isMobile?"8px 12px":"10px 16px",
-        display:"flex",flexDirection:isMobile?"column":"row",alignItems:isMobile?"stretch":"center",
-        justifyContent:"space-between",gap:isMobile?6:0,
-        background:"linear-gradient(to bottom,rgba(3,2,16,0.94) 55%,transparent)"}}>
-        {/* Row 1: logo + status + info */}
+      <div style={{position:"absolute",top:0,left:0,right:0,
+        padding:isMobile?"9px 12px":"11px 18px",
+        display:"flex",flexDirection:isMobile?"column":"row",
+        alignItems:isMobile?"stretch":"center",
+        justifyContent:"space-between",gap:isMobile?7:0,
+        background:"linear-gradient(to bottom,rgba(3,2,16,0.96) 60%,transparent)"}}>
+
+        {/* Row 1: logo + status + "How to play" */}
         <div style={{display:"flex",alignItems:"center",gap:10,justifyContent:"space-between"}}>
           <div style={{display:"flex",alignItems:"center",gap:10}}>
-            <svg width="22" height="22" viewBox="0 0 22 22" style={{flexShrink:0}}>
-              <circle cx="11" cy="11" r="2.2" fill="rgba(195,245,240,0.96)"/>
+            {/* Logo — slightly larger, brighter */}
+            <svg width={isMobile?24:28} height={isMobile?24:28} viewBox="0 0 22 22" style={{flexShrink:0,filter:"drop-shadow(0 0 3px rgba(195,245,240,0.35))"}}>
+              <circle cx="11" cy="11" r="2.4" fill="rgba(210,255,248,0.98)"/>
               {[0,1,2,3,4,5,6,7].map(i=>{
                 const a=(i/8)*Math.PI*2-Math.PI/2;
-                return <line key={i} x1="11" y1="11" x2={11+Math.cos(a)*10} y2={11+Math.sin(a)*10} stroke="rgba(218,210,178,0.36)" strokeWidth="0.7"/>;
+                return <line key={i} x1="11" y1="11" x2={11+Math.cos(a)*10} y2={11+Math.sin(a)*10} stroke="rgba(228,218,185,0.55)" strokeWidth="0.85"/>;
               })}
               {[0.38,0.65,0.92].map((f,i)=>
-                <circle key={i} cx="11" cy="11" r={f*10} fill="none" stroke={`rgba(218,210,178,${0.12+i*0.06})`} strokeWidth="0.7"/>
+                <circle key={i} cx="11" cy="11" r={f*10} fill="none" stroke={`rgba(228,218,185,${0.18+i*0.09})`} strokeWidth="0.85"/>
               )}
             </svg>
             <div>
-              <span style={{fontFamily:"monospace",fontSize:isMobile?12:14,color:"#d0c8ff",letterSpacing:2,fontWeight:"bold"}}>Pokémon Silk</span>
-              <span style={{fontSize:9,color:"rgba(190,184,245,0.60)",marginLeft:9,letterSpacing:1,fontFamily:"monospace"}}>
+              <span style={{fontFamily:"monospace",fontSize:isMobile?13:16,color:"#e0d8ff",letterSpacing:2,fontWeight:"bold",
+                textShadow:"0 0 12px rgba(180,160,255,0.30)"}}>Pokémon Silk</span>
+              <span style={{fontSize:isMobile?9:10,color:"rgba(200,195,255,0.65)",marginLeft:10,letterSpacing:1,fontFamily:"monospace"}}>
                 {totalCount>0?`${totalCount} lurking`:"all clear"}
               </span>
-              {overdueCount>0&&<span style={{fontSize:9,color:"rgba(255,100,80,0.85)",marginLeft:8,letterSpacing:1,fontFamily:"monospace"}}>· {overdueCount} overdue</span>}
+              {overdueCount>0&&<span style={{fontSize:isMobile?9:10,color:"rgba(255,110,85,0.92)",marginLeft:8,letterSpacing:1,fontFamily:"monospace"}}>· {overdueCount} overdue</span>}
             </div>
           </div>
-          {/* Info button — always visible next to title */}
-          <button onClick={()=>setShowInfo(true)} title="How to play"
-            style={{background:"rgba(70,60,130,0.20)",border:"1px solid rgba(110,100,180,0.32)",
-              color:"rgba(180,172,240,0.75)",padding:"4px 9px",borderRadius:3,
-              cursor:"pointer",fontSize:11,fontFamily:"monospace",letterSpacing:0,lineHeight:1}}>ⓘ</button>
+          {/* "How to play" button — clearly labelled */}
+          <button onClick={()=>setShowInfo(true)}
+            style={{background:"rgba(90,75,165,0.30)",border:"1px solid rgba(145,130,220,0.52)",
+              color:"rgba(205,195,255,0.92)",padding:isMobile?"5px 10px":"5px 12px",
+              borderRadius:4,cursor:"pointer",
+              fontSize:isMobile?9:10,fontFamily:"monospace",letterSpacing:0.5,
+              whiteSpace:"nowrap",fontWeight:"bold",
+              boxShadow:"0 0 8px rgba(120,100,220,0.15)"}}>
+            ⓘ How to play
+          </button>
         </div>
-        {/* Row 2 (or right side): action buttons */}
-        <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap",justifyContent:isMobile?"flex-start":"flex-end"}}>
+
+        {/* Row 2 (or right side on desktop): action buttons */}
+        <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap",
+          justifyContent:isMobile?"flex-start":"flex-end"}}>
           {overdueCount>0&&(
             <button onClick={()=>askConfirm(`Squish all ${overdueCount} overdue task${overdueCount>1?"s":""}?`,bulkSquishOverdue)}
-              style={{background:"rgba(140,30,14,0.22)",border:"1px solid rgba(160,40,18,0.45)",
-                color:"rgba(255,120,90,0.90)",padding:"5px 10px",borderRadius:3,
-                cursor:"pointer",fontSize:9,letterSpacing:1,fontFamily:"monospace"}}>
+              style={{background:"rgba(150,32,14,0.28)",border:"1px solid rgba(180,45,20,0.55)",
+                color:"rgba(255,130,100,0.96)",padding:"5px 11px",borderRadius:4,
+                cursor:"pointer",fontSize:isMobile?9:10,letterSpacing:0.5,fontFamily:"monospace",fontWeight:"bold"}}>
               💀 squish overdue
             </button>
           )}
-          <button onClick={exportData} title="Export backup"
-            style={{background:"rgba(40,60,120,0.18)",border:"1px solid rgba(60,90,160,0.32)",
-              color:"rgba(150,180,240,0.72)",padding:"5px 9px",borderRadius:3,cursor:"pointer",fontSize:13,lineHeight:1}}>↓</button>
-          <button onClick={()=>askConfirm("Import will replace all current data. Continue?",()=>importRef.current?.click())}
-            title="Import backup"
-            style={{background:"rgba(40,60,120,0.18)",border:"1px solid rgba(60,90,160,0.32)",
-              color:"rgba(150,180,240,0.72)",padding:"5px 9px",borderRadius:3,cursor:"pointer",fontSize:13,lineHeight:1}}>↑</button>
           {[
-            ["task",    "+ task",    "rgba(78,70,145,0.22)","rgba(98,90,172,0.40)","#b2aaea"],
-            ["project","+ project","rgba(45,82,145,0.24)","rgba(55,108,172,0.44)","#92bcec"],
+            {label:"↓",title:"Export backup",   onClick:exportData},
+            {label:"↑",title:"Import backup",   onClick:()=>askConfirm("Import will replace all current data. Continue?",()=>importRef.current?.click())},
+          ].map(({label,title,onClick})=>(
+            <button key={label} onClick={onClick} title={title}
+              style={{background:"rgba(45,68,135,0.28)",border:"1px solid rgba(70,105,185,0.45)",
+                color:"rgba(165,195,255,0.88)",padding:"5px 10px",borderRadius:4,
+                cursor:"pointer",fontSize:14,lineHeight:1,fontWeight:"bold"}}>
+              {label}
+            </button>
+          ))}
+          {[
+            ["task",    "+ task",    "rgba(88,78,158,0.28)","rgba(115,105,195,0.52)","#c4bcf8"],
+            ["project","+ project","rgba(48,88,158,0.28)","rgba(65,118,195,0.52)","#a0c8f8"],
           ].map(([key,lbl,bg,border,col])=>(
             <button key={key}
               onClick={()=>{setShowForm(f=>f===key?null:key);setPopup(null);setEditItem(null);setActiveProj(null);}}
-              style={{background:showForm===key?"rgba(115,30,14,0.22)":bg,
-                border:`1px solid ${showForm===key?"rgba(142,38,18,0.50)":border}`,
-                color:showForm===key?"#d26858":col,
-                padding:"5px 12px",borderRadius:3,cursor:"pointer",fontSize:10,letterSpacing:1,fontFamily:"monospace"}}>
+              style={{background:showForm===key?"rgba(125,32,14,0.28)":bg,
+                border:`1px solid ${showForm===key?"rgba(155,42,20,0.55)":border}`,
+                color:showForm===key?"#e07868":col,
+                padding:"5px 13px",borderRadius:4,cursor:"pointer",
+                fontSize:isMobile?10:11,letterSpacing:0.5,fontFamily:"monospace",fontWeight:"bold"}}>
               {showForm===key?"✕":lbl}
             </button>
           ))}
@@ -1205,7 +1222,7 @@ function PokemonSilk(){
 
       {/* ── Subtask panel ──────────────────────────────────────────────────── */}
       {activeProjObj&&(
-        <div style={{position:"absolute",top:isMobile?82:46,left:10,
+        <div style={{position:"absolute",top:isMobile?90:52,left:10,
           background:"rgba(5,4,22,0.96)",border:"1px solid rgba(82,118,192,0.34)",
           borderRadius:6,padding:"10px 12px",zIndex:25,
           maxWidth:isMobile?"calc(100vw - 20px)":"54%",
@@ -1517,7 +1534,11 @@ function PokemonSilk(){
                 {key:"dewpider",name:"Dewpider", col:SPECIES_COLOR.dewpider,desc:"Chill exterior. Absolutely not fine."},
               ].map(({key,name,col,desc})=>(
                 <div key={key} style={{flex:"1 1 120px",padding:"10px 8px",background:col.pill,border:`1px solid ${col.border}`,borderRadius:6,display:"flex",flexDirection:"column",alignItems:"center",gap:5}}>
-                  <img src={spriteUrls(key)[0]} alt={name} style={{width:46,height:46,imageRendering:"pixelated"}} onError={e=>{e.target.src=spriteUrls(key)[1];}}/>
+                  <div style={{width:56,height:56,display:"flex",alignItems:"center",justifyContent:"center"}}>
+                    <img src={spriteUrls(key)[0]} alt={name}
+                      style={{width:56,height:56,imageRendering:"pixelated",objectFit:"contain"}}
+                      onError={e=>{e.target.src=spriteUrls(key)[1];}}/>
+                  </div>
                   <div style={{fontFamily:"monospace",fontSize:10,color:col.text,fontWeight:"bold"}}>{name}</div>
                   <div style={{fontFamily:"monospace",fontSize:8,color:"rgba(210,205,255,0.62)",textAlign:"center",lineHeight:1.5}}>{desc}</div>
                 </div>
@@ -1531,7 +1552,11 @@ function PokemonSilk(){
                 {key:"araquanid", name:"Araquanid",  col:SPECIES_COLOR.dewpider,desc:"Dewpider finally grew up. Now it's your boss."},
               ].map(({key,name,col,desc})=>(
                 <div key={key} style={{flex:"1 1 120px",padding:"10px 8px",background:col.pill,border:`1px solid ${col.border}`,borderRadius:6,display:"flex",flexDirection:"column",alignItems:"center",gap:5,opacity:0.88}}>
-                  <img src={spriteUrls(key)[0]} alt={name} style={{width:46,height:46,imageRendering:"pixelated"}} onError={e=>{e.target.src=spriteUrls(key)[1];}}/>
+                  <div style={{width:56,height:56,display:"flex",alignItems:"center",justifyContent:"center"}}>
+                    <img src={spriteUrls(key)[0]} alt={name}
+                      style={{width:56,height:56,imageRendering:"pixelated",objectFit:"contain"}}
+                      onError={e=>{e.target.src=spriteUrls(key)[1];}}/>
+                  </div>
                   <div style={{fontFamily:"monospace",fontSize:10,color:col.text,fontWeight:"bold"}}>{name}</div>
                   <div style={{fontFamily:"monospace",fontSize:8,color:"rgba(210,205,255,0.62)",textAlign:"center",lineHeight:1.5}}>{desc}</div>
                 </div>
