@@ -84,6 +84,11 @@ function spriteUrls(name){
   ];
 }
 
+// Pixelated static sprite URL for UI display (info panel etc.)
+function staticSpriteUrl(name){
+  const ids={spinarak:167,joltik:595,dewpider:751,ariados:168,galvantula:596,araquanid:752};
+  return `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/${ids[name]||0}.png`;
+}
 // ─── Radius (4-zone piecewise) ────────────────────────────────────────────────
 function getRadius(deadline, now, maxR){
   const ms=deadline-now; if(ms<=0) return 0;
@@ -1535,9 +1540,9 @@ function PokemonSilk(){
               ].map(({key,name,col,desc})=>(
                 <div key={key} style={{flex:"1 1 120px",padding:"10px 8px",background:col.pill,border:`1px solid ${col.border}`,borderRadius:6,display:"flex",flexDirection:"column",alignItems:"center",gap:5}}>
                   <div style={{width:56,height:56,display:"flex",alignItems:"center",justifyContent:"center"}}>
-                    <img src={spriteUrls(key)[0]} alt={name}
+                    <img src={staticSpriteUrl(key)} alt={name}
                       style={{width:56,height:56,imageRendering:"pixelated",objectFit:"contain"}}
-                      onError={e=>{e.target.src=spriteUrls(key)[1];}}/>
+                      onError={e=>{e.target.src=spriteUrls(key)[0];}}/>
                   </div>
                   <div style={{fontFamily:"monospace",fontSize:10,color:col.text,fontWeight:"bold"}}>{name}</div>
                   <div style={{fontFamily:"monospace",fontSize:8,color:"rgba(210,205,255,0.62)",textAlign:"center",lineHeight:1.5}}>{desc}</div>
@@ -1553,9 +1558,9 @@ function PokemonSilk(){
               ].map(({key,name,col,desc})=>(
                 <div key={key} style={{flex:"1 1 120px",padding:"10px 8px",background:col.pill,border:`1px solid ${col.border}`,borderRadius:6,display:"flex",flexDirection:"column",alignItems:"center",gap:5,opacity:0.88}}>
                   <div style={{width:56,height:56,display:"flex",alignItems:"center",justifyContent:"center"}}>
-                    <img src={spriteUrls(key)[0]} alt={name}
+                    <img src={staticSpriteUrl(key)} alt={name}
                       style={{width:56,height:56,imageRendering:"pixelated",objectFit:"contain"}}
-                      onError={e=>{e.target.src=spriteUrls(key)[1];}}/>
+                      onError={e=>{e.target.src=spriteUrls(key)[0];}}/>
                   </div>
                   <div style={{fontFamily:"monospace",fontSize:10,color:col.text,fontWeight:"bold"}}>{name}</div>
                   <div style={{fontFamily:"monospace",fontSize:8,color:"rgba(210,205,255,0.62)",textAlign:"center",lineHeight:1.5}}>{desc}</div>
