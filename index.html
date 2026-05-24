@@ -114,26 +114,42 @@ function overduePos(ent, allEntities, cx, cy, now){
   const spread = Math.min(18, count * 4);
   return { x: cx + Math.cos(angle) * spread, y: cy + Math.sin(angle) * spread };
 }
-const MAX_RECURRING_SHOWN = 5; // max instances shown per series at once
+const MAX_RECURRING_SHOWN = 3; // max instances shown per series at once
 
-function expandRecurring(tmpl, now, hpMap, streakMap){
+function expandRecurring(tmpl, now, hpMap, streakMap, existingAngles){
   if(tmpl.paused) return [];
-  const stepMs    = freqMs(tmpl.freq);
-  const maxCount  = tmpl.count==="infinite" ? 9999 : Number(tmpl.count);
-  const suffix    = `(${freqShort(tmpl.freq)})`;
-  const rng       = seededRng(hashStr(tmpl.id));
+  const stepMs   = freqMs(tmpl.freq);
+  const maxCount = tmpl.count==="infinite" ? 9999 : Number(tmpl.count);
+  const suffix   = `(${freqShort(tmpl.freq)})`;
+  const rng      = seededRng(hashStr(tmpl.id));
   const instances = [];
+  // Build up used angles as we go so each instance avoids previous ones too
+  const usedAngles = [...(existingAngles||[])];
+
   for(let i=0; i<maxCount; i++){
     const deadline = tmpl.startDeadline + i*stepMs;
-    const angle    = (rng()*Math.PI*2 + i*2.399) % (Math.PI*2);
+    // Pre-consume two RNG values (raw angle + jitter) for deterministic stability
+    const rawAngle = (rng()*Math.PI*2 + i*2.399) % (Math.PI*2);
+    const jitter   = (rng()-0.5)*0.12;
     const key = `${tmpl.id}:${i}`;
     const hp  = hpMap[key] ?? tmpl.maxHp;
-    if(hp<=0) continue; // squished — skip
-    // Show overdue and upcoming instances, up to MAX_RECURRING_SHOWN total
+    if(hp<=0) continue;
+
+    // Pick best of 16 evenly-spaced candidates to maximise distance from usedAngles
+    let bestAngleVal=rawAngle, bestDist=-1;
+    for(let c=0;c<16;c++){
+      const cand=(rawAngle+c*(Math.PI*2/16))%(Math.PI*2);
+      const minDist=usedAngles.length===0 ? Math.PI*2
+        : usedAngles.reduce((mn,a)=>{const d=Math.abs(cand-a);return Math.min(mn,d,Math.PI*2-d);},Math.PI*2);
+      if(minDist>bestDist){bestDist=minDist;bestAngleVal=cand;}
+    }
+    const angle=(bestAngleVal+jitter+Math.PI*2)%(Math.PI*2);
+    usedAngles.push(angle);
+
     instances.push({id:key, name:`${tmpl.name} ${suffix}`, deadline, type:tmpl.type,
       maxHp:tmpl.maxHp, hp, angle, isRecurring:true,
       templateId:tmpl.id, occIdx:i, streak:streakMap?.[tmpl.id]??0});
-    if(instances.length >= MAX_RECURRING_SHOWN) break;
+    if(instances.length>=MAX_RECURRING_SHOWN) break;
   }
   return instances;
 }
@@ -536,9 +552,18 @@ function PokemonSilk(){
 
   // Expand recurring
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const recurringInstances=useMemo(()=>
-    recurringTemplates.flatMap(tmpl=>expandRecurring(tmpl,Date.now(),recurringHp,streaks)),
-  [recurringTemplates,recurringHp,streaks,tick]);
+  const recurringInstances=useMemo(()=>{
+    // Seed with all regular task/project angles so recurring instances avoid them
+    const baseAngles=[...tasks.map(t=>t.angle),...projects.map(p=>p.angle)];
+    const allInstances=[];
+    for(const tmpl of recurringTemplates){
+      // Pass angles already used (base + previously placed recurring) so series spread apart
+      const usedSoFar=[...baseAngles,...allInstances.map(i=>i.angle)];
+      const inst=expandRecurring(tmpl,Date.now(),recurringHp,streaks,usedSoFar);
+      allInstances.push(...inst);
+    }
+    return allInstances;
+  },[recurringTemplates,recurringHp,streaks,tick,tasks,projects]);
   useEffect(()=>{ stateRef.current.recurringInstances=recurringInstances; },[recurringInstances]);
 
   // ── Helpers ────────────────────────────────────────────────────────────────
@@ -1664,7 +1689,7 @@ function PokemonSilk(){
             {/* Section 5: Recurring */}
             <div style={{fontFamily:"monospace",fontSize:9,color:"rgba(120,204,224,0.75)",letterSpacing:1.5,marginBottom:10}}>⑤ RECURRING TASKS</div>
             <div style={{fontFamily:"monospace",fontSize:9,color:"rgba(205,200,255,0.78)",lineHeight:1.85,marginBottom:20}}>
-              Tick <span style={{color:"#78cce0",fontWeight:"bold"}}>Recurring</span> when creating a task. Set a frequency — daily <span style={{color:"#78cce0"}}>(d)</span>, weekly <span style={{color:"#78cce0"}}>(w)</span>, or monthly <span style={{color:"#78cce0"}}>(m)</span> — and how many times, or ∞ for things that never end (gym, laundry, that one meeting). The next 5 unsquished instances always live on the web, including overdue ones. Squish on time to build your <span style={{color:"#ffcc30",fontWeight:"bold"}}>🔥 streak</span>. Miss one and it resets. From the popup you can <span style={{color:"#d4a030",fontWeight:"bold"}}>⏸ pause</span> the whole series, <span style={{color:"#b2aaea",fontWeight:"bold"}}>⏭ skip</span> one occurrence without penalty, or remove it entirely.
+              Tick <span style={{color:"#78cce0",fontWeight:"bold"}}>Recurring</span> when creating a task. Set a frequency — daily <span style={{color:"#78cce0"}}>(d)</span>, weekly <span style={{color:"#78cce0"}}>(w)</span>, or monthly <span style={{color:"#78cce0"}}>(m)</span> — and how many times, or ∞ for things that never end (gym, laundry, that one meeting). The next 3 unsquished instances always live on the web, including overdue ones. Squish on time to build your <span style={{color:"#ffcc30",fontWeight:"bold"}}>🔥 streak</span>. Miss one and it resets. From the popup you can <span style={{color:"#d4a030",fontWeight:"bold"}}>⏸ pause</span> the whole series, <span style={{color:"#b2aaea",fontWeight:"bold"}}>⏭ skip</span> one occurrence without penalty, or remove it entirely.
             </div>
 
             {/* Section 6: Saving */}
