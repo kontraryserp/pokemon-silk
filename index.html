@@ -1567,6 +1567,7 @@ function PokemonSilk(){
             maxHeight:"88vh",overflowY:"auto",
             boxShadow:"0 4px 40px rgba(0,0,0,0.88), 0 0 24px rgba(110,100,200,0.18)",
           }}>
+            {/* Header */}
             <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:4}}>
               <div style={{display:"flex",alignItems:"center",gap:10}}>
                 <svg width="20" height="20" viewBox="0 0 22 22">
@@ -1581,14 +1582,14 @@ function PokemonSilk(){
             <div style={{fontFamily:"monospace",fontSize:9,color:"rgba(180,172,240,0.45)",marginBottom:18,letterSpacing:1}}>v3 · fan project by Aditya Koneru</div>
 
             {/* Opening */}
-            <div style={{fontFamily:"monospace",fontSize:10,color:"rgba(215,210,255,0.90)",lineHeight:1.95,marginBottom:22,padding:"14px 16px",background:"rgba(80,60,180,0.13)",borderRadius:7,border:"1px solid rgba(120,100,210,0.24)"}}>
-              A <span style={{color:"#c8beff",fontWeight:"bold"}}>visual to-do list</span> where your tasks become spider Pokémon crawling toward the center of a web. Position = urgency. The closer a spider is to the center, the sooner its deadline. Tasks have <span style={{color:"#e8c840",fontWeight:"bold"}}>health points</span> and take multiple hits to clear. Bigger work lives as <span style={{color:"#f0a060",fontWeight:"bold"}}>boss Pokémon</span> with subtasks. <span style={{color:"#78cce0",fontWeight:"bold"}}>Recurring tasks</span> auto-schedule and track streaks. Overdue tasks park at the center and <span style={{color:"#ff7060",fontWeight:"bold"}}>pulse red</span> until dealt with. Everything saves to your browser automatically — no account needed.
+            <div style={{fontFamily:"monospace",fontSize:10,color:"rgba(215,210,255,0.92)",lineHeight:1.95,marginBottom:22,padding:"14px 16px",background:"rgba(80,60,180,0.13)",borderRadius:7,border:"1px solid rgba(120,100,210,0.24)"}}>
+              A <span style={{color:"#c8beff",fontWeight:"bold"}}>visual to-do list</span> where your tasks become spider Pokémon crawling toward the center of a glowing web — the closer to the center, the sooner the deadline. Tasks have <span style={{color:"#e8c840",fontWeight:"bold"}}>health points</span> and take multiple hits to clear. Big multi-step work spawns as <span style={{color:"#f0a060",fontWeight:"bold"}}>evolved boss Pokémon</span> with subtasks. <span style={{color:"#78cce0",fontWeight:"bold"}}>Recurring tasks</span> auto-schedule and track your 🔥 streak. Miss a deadline and your spider goes <span style={{color:"#ff7060",fontWeight:"bold"}}>OVERDUE</span> — parked at the center, pulsing red, judging you. Everything auto-saves to your browser. No account. No cloud. Just you, the web, and your rapidly approaching deadlines.
             </div>
 
-            {/* Section 1 */}
-            <div style={{fontFamily:"monospace",fontSize:9,color:"rgba(120,204,224,0.75)",letterSpacing:1.5,marginBottom:10}}>① THE WEB</div>
+            {/* Section 1: The Web */}
+            <div style={{fontFamily:"monospace",fontSize:9,color:"rgba(120,204,224,0.75)",letterSpacing:1.5,marginBottom:10}}>① THE WEB — YOUR ANXIETY, VISUALISED</div>
             <div style={{fontFamily:"monospace",fontSize:9,color:"rgba(205,200,255,0.78)",lineHeight:1.85,marginBottom:10}}>
-              Three faint dashed rings mark the <span style={{color:"#78cce0",fontWeight:"bold"}}>deadline zones</span>:
+              Three faint dashed rings divide the web into <span style={{color:"#78cce0",fontWeight:"bold"}}>deadline zones</span>. Spiders spawn at the outer edge and creep inward. The closer to the center, the sooner the deadline:
             </div>
             <div style={{display:"flex",gap:8,marginBottom:10,flexWrap:"wrap"}}>
               {[
@@ -1604,20 +1605,20 @@ function PokemonSilk(){
               ))}
             </div>
             <div style={{fontFamily:"monospace",fontSize:9,color:"rgba(205,200,255,0.78)",lineHeight:1.85,marginBottom:20}}>
-              Spiders move faster as they approach the center — the last 24 hours compress quickly. Anything that reaches the center without being squished goes <span style={{color:"#ff7060",fontWeight:"bold"}}>OVERDUE</span> and stays there until you deal with it. The <span style={{color:"rgba(255,130,100,0.95)",fontWeight:"bold"}}>💀 squish overdue</span> button in the header clears them all at once if things pile up.
+              Inside that final 24-hour ring, things accelerate sharply. Anything that reaches the center goes <span style={{color:"#ff7060",fontWeight:"bold"}}>OVERDUE</span> and stays there until you deal with it. If several pile up, the <span style={{color:"rgba(255,130,100,0.95)",fontWeight:"bold"}}>💀 squish overdue</span> button in the header clears them all at once.
             </div>
 
-            {/* Section 2 */}
-            <div style={{fontFamily:"monospace",fontSize:9,color:"rgba(232,200,64,0.75)",letterSpacing:1.5,marginBottom:10}}>② THE POKÉMON</div>
+            {/* Section 2: The Pokémon */}
+            <div style={{fontFamily:"monospace",fontSize:9,color:"rgba(232,200,64,0.75)",letterSpacing:1.5,marginBottom:10}}>② THE CAST</div>
             <div style={{fontFamily:"monospace",fontSize:9,color:"rgba(205,200,255,0.78)",lineHeight:1.85,marginBottom:12}}>
-              Three species for tasks, three evolved forms for projects. The task species are <span style={{color:"#a8d868",fontWeight:"bold"}}>yours to define</span> — work vs personal, urgent vs low-priority, however you want to split things up. No right answer.
+              Six spider Pokémon live on your web. Three handle regular tasks, three run projects. The three task species mean <span style={{color:"#a8d868",fontWeight:"bold"}}>whatever you want them to mean</span> — work vs personal, urgent vs background, this week vs someday. Assign them however fits your life. No rules here.
             </div>
             <div style={{fontFamily:"monospace",fontSize:8,color:"rgba(168,216,104,0.50)",letterSpacing:1,marginBottom:7}}>TASKS</div>
             <div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap"}}>
               {[
-                {key:"spinarak",name:"Spinarak",col:SPECIES_COLOR.spinarak,desc:"Nimble. Gets things done."},
-                {key:"joltik",  name:"Joltik",  col:SPECIES_COLOR.joltik,  desc:"Small but urgent. Sneaks up on you."},
-                {key:"dewpider",name:"Dewpider", col:SPECIES_COLOR.dewpider,desc:"Calm exterior. Questionable interior."},
+                {key:"spinarak",name:"Spinarak",col:SPECIES_COLOR.spinarak,desc:"Nimble. Slightly sinister. Your reliable workhorse."},
+                {key:"joltik",  name:"Joltik",  col:SPECIES_COLOR.joltik,  desc:"Tiny but electric. The ones that sneak up on you."},
+                {key:"dewpider",name:"Dewpider", col:SPECIES_COLOR.dewpider,desc:"Calm exterior. Completely not fine."},
               ].map(({key,name,col,desc})=>(
                 <div key={key} style={{flex:"1 1 120px",padding:"10px 8px",background:col.pill,border:`1px solid ${col.border}`,borderRadius:6,display:"flex",flexDirection:"column",alignItems:"center",gap:5}}>
                   <div style={{width:52,height:52,display:"flex",alignItems:"center",justifyContent:"center"}}>
@@ -1628,12 +1629,12 @@ function PokemonSilk(){
                 </div>
               ))}
             </div>
-            <div style={{fontFamily:"monospace",fontSize:8,color:"rgba(232,200,64,0.50)",letterSpacing:1,marginBottom:7}}>PROJECTS (bosses)</div>
-            <div style={{display:"flex",gap:8,marginBottom:20,flexWrap:"wrap"}}>
+            <div style={{fontFamily:"monospace",fontSize:8,color:"rgba(232,200,64,0.50)",letterSpacing:1,marginBottom:7}}>PROJECT BOSSES</div>
+            <div style={{display:"flex",gap:8,marginBottom:8,flexWrap:"wrap"}}>
               {[
-                {key:"ariados",   name:"Ariados",   col:SPECIES_COLOR.spinarak,desc:"Spinarak, but it has been at this for weeks."},
-                {key:"galvantula",name:"Galvantula", col:SPECIES_COLOR.joltik,  desc:"More legs. More problems."},
-                {key:"araquanid", name:"Araquanid",  col:SPECIES_COLOR.dewpider,desc:"Dewpider grew up. Now it looms."},
+                {key:"ariados",   name:"Ariados",   col:SPECIES_COLOR.spinarak,desc:"Spinarak's evolved form. It has been waiting."},
+                {key:"galvantula",name:"Galvantula", col:SPECIES_COLOR.joltik,  desc:"More legs. More problems. Still electric."},
+                {key:"araquanid", name:"Araquanid",  col:SPECIES_COLOR.dewpider,desc:"Dewpider grew up and became your problem."},
               ].map(({key,name,col,desc})=>(
                 <div key={key} style={{flex:"1 1 120px",padding:"10px 8px",background:col.pill,border:`1px solid ${col.border}`,borderRadius:6,display:"flex",flexDirection:"column",alignItems:"center",gap:5,opacity:0.88}}>
                   <div style={{width:52,height:52,display:"flex",alignItems:"center",justifyContent:"center"}}>
@@ -1644,40 +1645,43 @@ function PokemonSilk(){
                 </div>
               ))}
             </div>
-
-            {/* Section 3 */}
-            <div style={{fontFamily:"monospace",fontSize:9,color:"rgba(168,216,104,0.75)",letterSpacing:1.5,marginBottom:10}}>③ TASKS</div>
-            <div style={{fontFamily:"monospace",fontSize:9,color:"rgba(205,200,255,0.78)",lineHeight:1.85,marginBottom:20}}>
-              Hit <span style={{color:"#b2aaea",fontWeight:"bold"}}>+ task</span>, name it, pick a creature, set a deadline. Optional: <span style={{color:"#f0c080",fontWeight:"bold"}}>health (1–5)</span> lets a task absorb multiple hits before it is cleared — useful for anything that takes several sessions. A <span style={{color:"#b2aaea",fontWeight:"bold"}}>note</span> field is available for any extra context. Once spawned, <span style={{color:"#e8c840",fontWeight:"bold"}}>tap any spider</span> to open its menu — squish it, deal –1 HP, edit it, or remove it. Each spider's label shows its name, time remaining, and current HP.
+            <div style={{fontFamily:"monospace",fontSize:8,color:"rgba(175,168,230,0.38)",lineHeight:1.6,marginBottom:20,paddingLeft:4}}>
+              Bosses breathe slowly and scale with your progress. They look patient. They are not.
             </div>
 
-            {/* Section 4 */}
-            <div style={{fontFamily:"monospace",fontSize:9,color:"rgba(255,160,100,0.75)",letterSpacing:1.5,marginBottom:10}}>④ PROJECTS</div>
+            {/* Section 3: Tasks */}
+            <div style={{fontFamily:"monospace",fontSize:9,color:"rgba(168,216,104,0.75)",letterSpacing:1.5,marginBottom:10}}>③ ADDING TASKS</div>
             <div style={{fontFamily:"monospace",fontSize:9,color:"rgba(205,200,255,0.78)",lineHeight:1.85,marginBottom:20}}>
-              <span style={{color:"#92bcec",fontWeight:"bold"}}>+ project</span> creates a multi-step task as a boss Pokémon. Add subtasks with their own HP — the boss's total HP is the sum of all of them. Tap the boss to open the subtask panel and work through each one. When every subtask reaches zero, <span style={{color:"#d26858",fontWeight:"bold"}}>💥 squish boss</span> becomes available.
+              Hit <span style={{color:"#b2aaea",fontWeight:"bold"}}>+ task</span>, name it, pick a creature, set a deadline. Optional: give it <span style={{color:"#f0c080",fontWeight:"bold"}}>health (1–5)</span> so it takes multiple hits to clear — great for tasks that need several sessions rather than one sitting. Add a <span style={{color:"#b2aaea",fontWeight:"bold"}}>note</span> if you need context later. Hit <span style={{color:"#b2aaea",fontWeight:"bold"}}>spawn →</span> and watch it appear on the web. <span style={{color:"#e8c840",fontWeight:"bold"}}>Tap any spider</span> to open its options: squish it, deal –1 HP, edit it, or remove it entirely.
             </div>
 
-            {/* Section 5 */}
+            {/* Section 4: Projects */}
+            <div style={{fontFamily:"monospace",fontSize:9,color:"rgba(255,160,100,0.75)",letterSpacing:1.5,marginBottom:10}}>④ PROJECTS — BOSS FIGHTS</div>
+            <div style={{fontFamily:"monospace",fontSize:9,color:"rgba(205,200,255,0.78)",lineHeight:1.85,marginBottom:20}}>
+              Hit <span style={{color:"#92bcec",fontWeight:"bold"}}>+ project</span> for anything multi-step. Pick a boss, add subtasks with their own HP bars, set a deadline. The boss's HP on the web is the sum of all subtasks — tap it to open the subtask panel and chip away. When every subtask reaches zero, <span style={{color:"#d26858",fontWeight:"bold"}}>💥 squish boss</span> unlocks. The explosion is proportional to how long it took you.
+            </div>
+
+            {/* Section 5: Recurring */}
             <div style={{fontFamily:"monospace",fontSize:9,color:"rgba(120,204,224,0.75)",letterSpacing:1.5,marginBottom:10}}>⑤ RECURRING TASKS</div>
             <div style={{fontFamily:"monospace",fontSize:9,color:"rgba(205,200,255,0.78)",lineHeight:1.85,marginBottom:20}}>
-              Check <span style={{color:"#78cce0",fontWeight:"bold"}}>Recurring</span> when creating a task. Set a frequency — daily <span style={{color:"#78cce0"}}>(d)</span>, weekly <span style={{color:"#78cce0"}}>(w)</span>, or monthly <span style={{color:"#78cce0"}}>(m)</span> — and a repeat count, or ∞ to run indefinitely. The next 5 unsquished instances are always on the web, including any overdue ones. Squish on time and your <span style={{color:"#ffcc30",fontWeight:"bold"}}>🔥 streak</span> grows; miss one and it resets. From the popup you can <span style={{color:"#d4a030",fontWeight:"bold"}}>⏸ pause</span> a series, <span style={{color:"#b2aaea",fontWeight:"bold"}}>⏭ skip</span> one occurrence without penalty, or remove it entirely.
+              Tick <span style={{color:"#78cce0",fontWeight:"bold"}}>Recurring</span> when creating a task. Set a frequency — daily <span style={{color:"#78cce0"}}>(d)</span>, weekly <span style={{color:"#78cce0"}}>(w)</span>, or monthly <span style={{color:"#78cce0"}}>(m)</span> — and how many times, or ∞ for things that never end (gym, laundry, that one meeting). The next 5 unsquished instances always live on the web, including overdue ones. Squish on time to build your <span style={{color:"#ffcc30",fontWeight:"bold"}}>🔥 streak</span>. Miss one and it resets. From the popup you can <span style={{color:"#d4a030",fontWeight:"bold"}}>⏸ pause</span> the whole series, <span style={{color:"#b2aaea",fontWeight:"bold"}}>⏭ skip</span> one occurrence without penalty, or remove it entirely.
             </div>
 
-            {/* Section 6 */}
+            {/* Section 6: Saving */}
             <div style={{fontFamily:"monospace",fontSize:9,color:"rgba(192,184,240,0.75)",letterSpacing:1.5,marginBottom:10}}>⑥ SAVING & SYNCING</div>
             <div style={{fontFamily:"monospace",fontSize:9,color:"rgba(205,200,255,0.78)",lineHeight:1.85,marginBottom:20}}>
-              Everything saves automatically to <span style={{color:"#c0b8f0",fontWeight:"bold"}}>this browser on this device</span>. No account required. To back up or move to another device: <span style={{color:"#96b4f0",fontWeight:"bold"}}>↓ Export</span> downloads a file with all your data, <span style={{color:"#96b4f0",fontWeight:"bold"}}>↑ Import</span> restores it anywhere. If you clear your browser data without a backup first, your tasks are gone — so export occasionally if that matters to you.
+              Auto-saves to <span style={{color:"#c0b8f0",fontWeight:"bold"}}>this browser on this device</span> every time something changes. No account, no login, no subscription. To move your data elsewhere: <span style={{color:"#96b4f0",fontWeight:"bold"}}>↓ Export</span> downloads a backup file, <span style={{color:"#96b4f0",fontWeight:"bold"}}>↑ Import</span> restores it on any device. Keep that file somewhere safe — clearing your browser without a backup means starting from scratch.
             </div>
 
-            {/* Section 7 */}
+            {/* Section 7: Everything else */}
             <div style={{fontFamily:"monospace",fontSize:9,color:"rgba(255,200,80,0.75)",letterSpacing:1.5,marginBottom:10}}>⑦ EVERYTHING ELSE</div>
             <div style={{display:"flex",flexDirection:"column",gap:7,marginBottom:20}}>
               {[
-                {e:"🕷",  t:"Tap outside the web",       d:"fires a silk strand toward the center."},
-                {e:"💧",  t:"Tap the web itself",         d:"sends a ripple from where you touched."},
-                {e:"🔍",  t:"Filter by evolution line",   d:"the left-side panel lets you focus on one species at a time."},
-                {e:"🕷️", t:"Spiders are animated",       d:"they bob, breathe, jiggle, spin, and occasionally flip direction."},
-                {e:"✨",  t:"The background",             d:"aurora bands, fireflies, shooting stars, and a moon with craters. It escalated."},
+                {e:"🕷",  t:"Tap the web",               d:"sends a ripple from where you touched. Tap outside the web and a silk strand fires toward the center."},
+                {e:"🔍",  t:"Filter by evolution line",   d:"left panel on desktop, bottom strip on mobile. Focus on one species at a time."},
+                {e:"🕷️", t:"Spiders are alive",          d:"they bob, breathe, jiggle, spin, and occasionally flip direction when they think you're not watching."},
+                {e:"💥",  t:"Squish explosions",          d:"leave fading splatter marks on the web. Boss squishes get a bigger version."},
+                {e:"✨",  t:"The sky",                    d:"aurora bands, drifting fireflies, shooting stars, a moon with actual craters. It's a lot. You'll get used to it."},
               ].map(({e,t,d})=>(
                 <div key={t} style={{display:"flex",gap:8,alignItems:"flex-start",padding:"8px 10px",background:"rgba(30,20,60,0.45)",borderRadius:5,border:"1px solid rgba(80,70,140,0.22)"}}>
                   <span style={{fontSize:14,flexShrink:0,marginTop:1}}>{e}</span>
@@ -1692,7 +1696,6 @@ function PokemonSilk(){
           </div>
         </div>
       )}
-
       {/* ── Credits — hidden on mobile (visible in info panel instead) ───────── */}
       {!isMobile&&<div style={{position:"absolute",bottom:8,right:12,textAlign:"right",fontFamily:"monospace",lineHeight:1.7}}>
         <div style={{fontSize:8,color:"rgba(198,192,252,0.52)",letterSpacing:0.5}}>
