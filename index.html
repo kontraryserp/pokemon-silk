@@ -69,13 +69,17 @@ function speciesColor(type){
 function bossLabel(key){ const b=BOSS_SPECIES[key]; return b?`${b.label} (${b.preEvo} evo)`:key; }
 
 const FREQ_OPTIONS = [
-  { value:"daily",    label:"Daily",        ms: ONE_DAY },
-  { value:"every2",   label:"Every 2 days", ms: 2*ONE_DAY },
-  { value:"weekly",   label:"Weekly",       ms: 7*ONE_DAY },
-  { value:"biweekly", label:"Bi-weekly",    ms: 14*ONE_DAY },
-  { value:"monthly",  label:"Monthly",      ms: 30*ONE_DAY },
+  { value:"daily",   label:"Daily",   short:"d", ms: ONE_DAY },
+  { value:"weekly",  label:"Weekly",  short:"w", ms: 7*ONE_DAY },
+  { value:"monthly", label:"Monthly", short:"m", ms: 30*ONE_DAY },
+  // Legacy values kept for backwards compatibility with existing saved data
+  { value:"every2",   label:"Every 2 days", short:"2d", ms: 2*ONE_DAY },
+  { value:"biweekly", label:"Bi-weekly",    short:"2w", ms: 14*ONE_DAY },
 ];
+// UI-visible options only (hides legacy)
+const FREQ_OPTIONS_UI = FREQ_OPTIONS.slice(0,3);
 function freqMs(v){ return FREQ_OPTIONS.find(f=>f.value===v)?.ms ?? ONE_DAY; }
+function freqShort(v){ return FREQ_OPTIONS.find(f=>f.value===v)?.short ?? "r"; }
 function spriteUrls(name){
   const ids={spinarak:167,joltik:595,dewpider:751,ariados:168,galvantula:596,araquanid:752};
   return [
@@ -110,40 +114,41 @@ function overduePos(ent, allEntities, cx, cy, now){
   const spread = Math.min(18, count * 4);
   return { x: cx + Math.cos(angle) * spread, y: cy + Math.sin(angle) * spread };
 }
+const MAX_RECURRING_SHOWN = 5; // max instances shown per series at once
+
 function expandRecurring(tmpl, now, hpMap, streakMap){
   if(tmpl.paused) return [];
-  const windowEnd = now + THIRTY_D;
   const stepMs    = freqMs(tmpl.freq);
   const maxCount  = tmpl.count==="infinite" ? 9999 : Number(tmpl.count);
-  const freqLabel = (FREQ_OPTIONS.find(f=>f.value===tmpl.freq)?.label || "recurring").toLowerCase();
-  const suffix    = `(${freqLabel})`;
+  const suffix    = `(${freqShort(tmpl.freq)})`;
   const rng       = seededRng(hashStr(tmpl.id));
   const instances = [];
-  let   foundAny  = false;
   for(let i=0; i<maxCount; i++){
     const deadline = tmpl.startDeadline + i*stepMs;
     const angle    = (rng()*Math.PI*2 + i*2.399) % (Math.PI*2);
     const key = `${tmpl.id}:${i}`;
     const hp  = hpMap[key] ?? tmpl.maxHp;
-    if(hp<=0) continue; // squished
-    if(deadline>windowEnd){
-      if(!foundAny){
-        instances.push({id:key, name:`${tmpl.name} ${suffix}`, deadline, type:tmpl.type,
-          maxHp:tmpl.maxHp, hp, angle, isRecurring:true,
-          templateId:tmpl.id, occIdx:i, streak:streakMap?.[tmpl.id]??0});
-        foundAny=true;
-      }
-      break;
-    }
+    if(hp<=0) continue; // squished — skip
+    // Show overdue and upcoming instances, up to MAX_RECURRING_SHOWN total
     instances.push({id:key, name:`${tmpl.name} ${suffix}`, deadline, type:tmpl.type,
       maxHp:tmpl.maxHp, hp, angle, isRecurring:true,
       templateId:tmpl.id, occIdx:i, streak:streakMap?.[tmpl.id]??0});
-    foundAny=true;
+    if(instances.length >= MAX_RECURRING_SHOWN) break;
   }
   return instances;
 }
 
-// ─── Pure helpers ─────────────────────────────────────────────────────────────
+// Which species types match a given filter line
+const FILTER_TYPES = {
+  all:      null, // null = show all
+  spinarak: new Set(["spinarak","ariados"]),
+  joltik:   new Set(["joltik","galvantula"]),
+  dewpider: new Set(["dewpider","araquanid"]),
+};
+function matchesFilter(type, filter){
+  const set = FILTER_TYPES[filter];
+  return !set || set.has(type);
+}
 function hashStr(s){ let h=0; for(let i=0;i<s.length;i++) h=(Math.imul(31,h)+s.charCodeAt(i))|0; return h>>>0; }
 function seededRng(seed){ let s=seed>>>0; return ()=>{ s=(Math.imul(1664525,s)+1013904223)>>>0; return s/0x100000000; }; }
 
@@ -419,13 +424,22 @@ const BTN=(v="primary")=>({
 // ─── React components ─────────────────────────────────────────────────────────
 function HpBar({hp, maxHp, compact=false}){
   if(!maxHp||maxHp<1) return null;
-  const ratio=Math.max(0,Math.min(1,hp/maxHp));
+  const filled=Math.max(0,Math.min(maxHp,Math.round(hp)));
+  const ratio=filled/maxHp;
   const hr=Math.round(220-ratio*140), hg=Math.round(60+ratio*160);
+  const segColor=`rgb(${hr},${hg},62)`;
   return (
     <div style={{marginBottom:compact?0:8}}>
       {!compact && <div style={{fontSize:8,fontFamily:"monospace",color:"rgba(178,170,232,0.58)",marginBottom:3,letterSpacing:1}}>{hp}/{maxHp} HP</div>}
-      <div style={{height:compact?4:6,background:"rgba(18,14,44,0.88)",borderRadius:3,overflow:"hidden",border:"1px solid rgba(112,102,182,0.24)"}}>
-        <div style={{height:"100%",width:`${ratio*100}%`,background:`rgb(${hr},${hg},62)`,borderRadius:3,transition:"width 0.2s"}}/>
+      <div style={{display:"flex",gap:2,height:compact?5:7}}>
+        {Array.from({length:maxHp},(_,i)=>(
+          <div key={i} style={{
+            flex:1,borderRadius:2,
+            background:i<filled?segColor:"rgba(18,14,44,0.88)",
+            border:`1px solid ${i<filled?"rgba(0,0,0,0.25)":"rgba(112,102,182,0.20)"}`,
+            transition:"background 0.2s",
+          }}/>
+        ))}
       </div>
       {compact && <div style={{fontSize:7,fontFamily:"monospace",color:"rgba(178,170,232,0.48)",marginTop:1,textAlign:"center"}}>{hp}/{maxHp}</div>}
     </div>
@@ -468,6 +482,8 @@ function PokemonSilk(){
     loadStored("psilk-recurring", d=>d.map(t=>({...t,startDeadline:Number(t.startDeadline)}))) ?? []);
   const [recurringHp, setRecurringHp] = useState(()=> loadStored("psilk-recurringHp", d=>d) ?? {});
   const [streaks,     setStreaks]      = useState(()=> loadStored("psilk-streaks",     d=>d) ?? {});
+  const [filter, setFilter] = useState("all"); // "all"|"spinarak"|"joltik"|"dewpider"
+  useEffect(()=>{ stateRef.current.filter=filter; },[filter]);
   const [tick, setTick] = useState(0);
 
   // ── UI state ───────────────────────────────────────────────────────────────
@@ -693,10 +709,12 @@ function PokemonSilk(){
     const isTouchDevice=window.innerWidth<600;
     const hitR=isTouchDevice?38:28, hitRProj=isTouchDevice?44:34;
     const distToCenter=Math.hypot(mx-cx, my-cy);
+    const activeFilter = stateRef.current.filter ?? "all";
     const allEnts=[...(stateRef.current.recurringInstances||[]),...stateRef.current.tasks,...stateRef.current.projects];
 
-    // Check entities first
+    // Check entities — skip those hidden by filter
     for(const inst of (stateRef.current.recurringInstances||[])){
+      if(!matchesFilter(inst.type, activeFilter)) continue;
       const r=getRadius(inst.deadline,now,maxR);
       const isOD=inst.deadline<=now;
       const pos=isOD?overduePos(inst,allEnts,cx,cy,now):{x:cx+Math.cos(inst.angle)*r,y:cy+Math.sin(inst.angle)*r};
@@ -706,6 +724,7 @@ function PokemonSilk(){
       }
     }
     for(const t of stateRef.current.tasks){
+      if(!matchesFilter(t.type, activeFilter)) continue;
       const r=getRadius(t.deadline,now,maxR);
       const isOD=t.deadline<=now;
       const pos=isOD?overduePos(t,allEnts,cx,cy,now):{x:cx+Math.cos(t.angle)*r,y:cy+Math.sin(t.angle)*r};
@@ -715,6 +734,7 @@ function PokemonSilk(){
       }
     }
     for(const p of stateRef.current.projects){
+      if(!matchesFilter(p.type, activeFilter)) continue;
       const r=getRadius(p.deadline,now,maxR);
       const isOD=p.deadline<=now;
       const pos=isOD?overduePos(p,allEnts,cx,cy,now):{x:cx+Math.cos(p.angle)*r,y:cy+Math.sin(p.angle)*r};
@@ -1022,14 +1042,18 @@ function PokemonSilk(){
         const chp2=isProj?projectCurrentHp(ent):(ent.hp??ent.maxHp??1);
         if(mhp2>1){
           const barW=Math.max(tw,50),barH=5,barX=lx2-barW/2,barY=ly2+th/2+(hpTxt?15:4);
-          const ratio=Math.max(0,Math.min(1,chp2/mhp2));
+          const filled=Math.max(0,Math.min(mhp2,Math.round(chp2)));
+          const ratio=filled/mhp2;
           const hr2=Math.round(220-ratio*140),hg2=Math.round(60+ratio*160);
+          const segW=(barW-(mhp2-1)*2)/mhp2; // segment width accounting for gaps
           ctx.save();ctx.globalAlpha=fadeIn;
-          ctx.fillStyle="rgba(4,4,20,0.85)";ctx.beginPath();ctx.roundRect(barX,barY,barW,barH,2);ctx.fill();
-          if(ratio>0){ctx.fillStyle=`rgba(${hr2},${hg2},62,0.92)`;ctx.beginPath();ctx.roundRect(barX,barY,barW*ratio,barH,2);ctx.fill();}
+          for(let seg=0;seg<mhp2;seg++){
+            const sx2=barX+seg*(segW+2);
+            const isFilled=seg<filled;
+            ctx.fillStyle=isFilled?`rgba(${hr2},${hg2},62,0.92)`:"rgba(4,4,20,0.85)";
+            ctx.beginPath();ctx.roundRect(sx2,barY,segW,barH,1.5);ctx.fill();
+          }
           if(!isProj){
-            ctx.strokeStyle="rgba(4,4,14,0.55)";ctx.lineWidth=1;
-            for(let p2=1;p2<mhp2;p2++){const px2=barX+(barW/mhp2)*p2;ctx.beginPath();ctx.moveTo(px2,barY);ctx.lineTo(px2,barY+barH);ctx.stroke();}
             ctx.font="8px monospace";ctx.fillStyle="rgba(218,214,250,0.78)";ctx.textAlign="center";
             ctx.fillText(`${chp2}/${mhp2}`,lx2,barY+barH+9);
           }
@@ -1038,10 +1062,14 @@ function PokemonSilk(){
       };
 
       // Build allEnts once — used by overduePos for multiple entities per frame
+      const activeFilter = stateRef.current.filter ?? "all";
       const allEnts=[...ts,...ri,...ps];
+      const visibleTs = ts.filter(t=>matchesFilter(t.type, activeFilter));
+      const visibleRi = ri.filter(e=>matchesFilter(e.type, activeFilter));
+      const visiblePs = ps.filter(p=>matchesFilter(p.type, activeFilter));
 
-      [...ri,...ts].forEach(t=>renderEnt(t,false));
-      ps.forEach(p=>renderEnt(p,true));
+      [...visibleRi,...visibleTs].forEach(t=>renderEnt(t,false));
+      visiblePs.forEach(p=>renderEnt(p,true));
 
       // Vignette
       const vig=ctx.createRadialGradient(cx,cy,maxR*0.40,cx,cy,Math.max(W,H)*0.82);
@@ -1134,7 +1162,68 @@ function PokemonSilk(){
       <canvas ref={canvasRef} onClick={handleClick}
         style={{width:"100%",height:"100%",display:"block",cursor:"crosshair",imageRendering:"pixelated"}}/>
 
-      {/* Backdrop — dismisses popup only, NOT edit form (mid-input, destructive) */}
+      {/* ── Filter panel — left side on desktop, bottom strip on mobile ───── */}
+      {!isMobile?(
+        // Desktop: vertical strip on left, centered vertically
+        <div style={{position:"absolute",left:10,top:"50%",transform:"translateY(-50%)",
+          display:"flex",flexDirection:"column",gap:5,zIndex:15,
+          background:"rgba(5,4,20,0.55)",border:"1px solid rgba(80,72,140,0.22)",
+          borderRadius:6,padding:"8px 5px",backdropFilter:"blur(4px)"}}>
+          {[
+            {key:"all",      emoji:"🕸️", label:"all"},
+            {key:"spinarak", emoji:"🕷",  label:"spin", col:SPECIES_COLOR.spinarak},
+            {key:"joltik",   emoji:"⚡",  label:"jolt", col:SPECIES_COLOR.joltik},
+            {key:"dewpider", emoji:"💧",  label:"dew",  col:SPECIES_COLOR.dewpider},
+          ].map(({key,emoji,label,col})=>{
+            const active=filter===key;
+            return(
+              <button key={key} onClick={()=>setFilter(key)} title={key==="all"?"Show all":key+" line"}
+                style={{
+                  background:active?(col?col.pill:"rgba(100,90,180,0.35)"):"transparent",
+                  border:`1px solid ${active?(col?col.border:"rgba(150,140,230,0.55)"):"transparent"}`,
+                  color:active?(col?col.text:"#d0c8ff"):"rgba(140,132,200,0.45)",
+                  padding:"5px 7px",borderRadius:4,cursor:"pointer",
+                  fontSize:10,fontFamily:"monospace",letterSpacing:0.3,
+                  display:"flex",flexDirection:"column",alignItems:"center",gap:2,
+                  transition:"all 0.15s",minWidth:34,
+                }}>
+                <span style={{fontSize:13,lineHeight:1}}>{emoji}</span>
+                <span style={{fontSize:7,lineHeight:1}}>{label}</span>
+              </button>
+            );
+          })}
+        </div>
+      ):(
+        // Mobile: horizontal strip pinned to bottom
+        <div style={{position:"absolute",bottom:22,left:"50%",transform:"translateX(-50%)",
+          display:"flex",flexDirection:"row",gap:5,zIndex:15,
+          background:"rgba(5,4,20,0.72)",border:"1px solid rgba(80,72,140,0.28)",
+          borderRadius:20,padding:"5px 10px",backdropFilter:"blur(4px)"}}>
+          {[
+            {key:"all",      emoji:"🕸️", label:"all"},
+            {key:"spinarak", emoji:"🕷",  label:"spin", col:SPECIES_COLOR.spinarak},
+            {key:"joltik",   emoji:"⚡",  label:"jolt", col:SPECIES_COLOR.joltik},
+            {key:"dewpider", emoji:"💧",  label:"dew",  col:SPECIES_COLOR.dewpider},
+          ].map(({key,emoji,label,col})=>{
+            const active=filter===key;
+            return(
+              <button key={key} onClick={()=>setFilter(key)}
+                style={{
+                  background:active?(col?col.pill:"rgba(100,90,180,0.35)"):"transparent",
+                  border:`1px solid ${active?(col?col.border:"rgba(150,140,230,0.55)"):"transparent"}`,
+                  color:active?(col?col.text:"#d0c8ff"):"rgba(140,132,200,0.45)",
+                  padding:"4px 8px",borderRadius:14,cursor:"pointer",
+                  fontSize:9,fontFamily:"monospace",
+                  display:"flex",alignItems:"center",gap:4,
+                  transition:"all 0.15s",
+                }}>
+                <span style={{fontSize:12}}>{emoji}</span>
+                <span>{label}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
       {popup&&!editItem&&<div onClick={()=>setPopup(null)} style={{position:"fixed",inset:0,zIndex:28,background:"transparent"}}/>}
 
       {confirm&&<ConfirmDialog message={confirm.message}
@@ -1186,7 +1275,7 @@ function PokemonSilk(){
           </button>
         </div>
 
-        {/* Row 2 (or right side on desktop): action buttons */}
+        {/* Row 2 (or right side on desktop): action buttons only */}
         <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap",
           justifyContent:isMobile?"flex-start":"flex-end"}}>
           {overdueCount>0&&(
@@ -1311,7 +1400,7 @@ function PokemonSilk(){
               <div style={{display:"flex",gap:9,marginTop:8,alignItems:"flex-end",flexWrap:"wrap"}}>
                 <div style={{display:"flex",flexDirection:"column",flex:"1 1 120px"}}>
                   <label style={LBL}>FREQUENCY</label>
-                  <select value={nFreq} onChange={e=>setNFreq(e.target.value)} style={INP({width:"100%",boxSizing:"border-box"})}>{FREQ_OPTIONS.map(f=><option key={f.value} value={f.value}>{f.label}</option>)}</select>
+                  <select value={nFreq} onChange={e=>setNFreq(e.target.value)} style={INP({width:"100%",boxSizing:"border-box"})}>{FREQ_OPTIONS_UI.map(f=><option key={f.value} value={f.value}>{f.label}</option>)}</select>
                 </div>
                 <div style={{display:"flex",flexDirection:"column",flex:"1 1 100px"}}>
                   <label style={LBL}>OCCURRENCES</label>
@@ -1377,7 +1466,7 @@ function PokemonSilk(){
           <div style={{fontFamily:"monospace",fontSize:12,color:"#d2ccff",marginBottom:2,fontWeight:"bold"}}>{selRecI.name}</div>
           <div style={{fontFamily:"monospace",fontSize:9,color:selRecI.deadline-Date.now()<=0?"rgba(255,120,100,0.80)":"rgba(178,172,232,0.55)",marginBottom:2}}>{formatCountdown(selRecI.deadline-Date.now())}</div>
           <div style={{fontFamily:"monospace",fontSize:8,color:"rgba(158,150,218,0.40)",marginBottom:selRecT.note?4:6,display:"flex",alignItems:"center",gap:10}}>
-            <span>occ. {selRecI.occIdx+1}{selRecT.count!=="infinite"?` of ${selRecT.count}`:""} · {FREQ_OPTIONS.find(f=>f.value===selRecT.freq)?.label}</span>
+            <span>occ. {selRecI.occIdx+1}{selRecT.count!=="infinite"?` of ${selRecT.count}`:""} · {FREQ_OPTIONS.find(f=>f.value===selRecT.freq)?.label??selRecT.freq}</span>
             {(streaks[selRecT.id]??0)>0&&<span style={{color:"rgba(255,200,60,0.75)"}}>🔥 {streaks[selRecT.id]}</span>}
           </div>
           {selRecT.note&&<div style={{fontFamily:"monospace",fontSize:9,color:"rgba(170,165,220,0.65)",marginBottom:8,lineHeight:1.5,borderLeft:"2px solid rgba(120,112,190,0.30)",paddingLeft:8}}>{selRecT.note}</div>}
@@ -1437,7 +1526,7 @@ function PokemonSilk(){
           {editItem.kind!=="project"&&<Field label="CREATURE"><select value={editItem.type} onChange={e=>setEditItem(t=>({...t,type:e.target.value}))} style={INP({width:"100%",boxSizing:"border-box"})}>{Object.entries(SPECIES).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}</select></Field>}
           {editItem.kind==="project"&&<Field label="BOSS"><select value={editItem.type} onChange={e=>setEditItem(t=>({...t,type:e.target.value}))} style={INP({width:"100%",boxSizing:"border-box"})}>{Object.keys(BOSS_SPECIES).map(k=><option key={k} value={k}>{bossLabel(k)}</option>)}</select></Field>}
           {editItem.kind==="recurring"&&<>
-            <Field label="FREQUENCY"><select value={editItem.freq} onChange={e=>setEditItem(t=>({...t,freq:e.target.value}))} style={INP({width:"100%",boxSizing:"border-box"})}>{FREQ_OPTIONS.map(f=><option key={f.value} value={f.value}>{f.label}</option>)}</select></Field>
+            <Field label="FREQUENCY"><select value={editItem.freq} onChange={e=>setEditItem(t=>({...t,freq:e.target.value}))} style={INP({width:"100%",boxSizing:"border-box"})}>{FREQ_OPTIONS_UI.map(f=><option key={f.value} value={f.value}>{f.label}</option>)}</select></Field>
             <Field label="OCCURRENCES"><select value={editItem.count} onChange={e=>setEditItem(t=>({...t,count:e.target.value}))} style={INP({width:"100%",boxSizing:"border-box"})}>{countOptions.map(c=><option key={c} value={c}>{c==="infinite"?"∞ infinite":c}</option>)}</select></Field>
             <Field label="MAX HEALTH"><select value={editItem.maxHp??1} onChange={e=>setEditItem(t=>({...t,maxHp:Number(e.target.value)}))} style={INP({width:"100%",boxSizing:"border-box"})}>{[1,2,3,4,5].map(n=><option key={n} value={n}>{n}</option>)}</select></Field>
           </>}
@@ -1583,7 +1672,7 @@ function PokemonSilk(){
             {/* ── Section 5: Recurring Tasks ── */}
             <div style={{fontFamily:"monospace",fontSize:9,color:"rgba(120,204,224,0.75)",letterSpacing:1.5,marginBottom:10}}>⑤ RECURRING TASKS</div>
             <div style={{fontFamily:"monospace",fontSize:9,color:"rgba(205,200,255,0.78)",lineHeight:1.85,marginBottom:20}}>
-              Tick <span style={{color:"#78cce0",fontWeight:"bold"}}>Recurring</span> when creating a task. Set frequency (daily → monthly) and how many times — or <span style={{color:"#78cce0",fontWeight:"bold"}}>∞ forever</span> for the things in life that never end (laundry, gym, that report). All upcoming occurrences within 30 days appear on the web simultaneously. Their labels show the cadence — <span style={{color:"#78cce0"}}>(weekly)</span>, <span style={{color:"#78cce0"}}>(daily)</span> — so you always know what you're looking at. Squish on time → <span style={{color:"#ffcc30",fontWeight:"bold"}}>🔥 streak grows</span>. Miss the deadline → streak resets, shame intensifies. From the popup you can <span style={{color:"#d4a030",fontWeight:"bold"}}>⏸ pause</span> a whole series, <span style={{color:"#b2aaea",fontWeight:"bold"}}>⏭ skip</span> one occurrence without penalty, or delete the series entirely.
+              Tick <span style={{color:"#78cce0",fontWeight:"bold"}}>Recurring</span> when creating a task. Set frequency (daily → monthly) and how many times — or <span style={{color:"#78cce0",fontWeight:"bold"}}>∞ forever</span> for the things in life that never end (laundry, gym, that report). The <span style={{color:"#78cce0",fontWeight:"bold"}}>next 5 instances</span> always live on the web at once — overdue ones included, so nothing silently slips past you. Their labels show the cadence — <span style={{color:"#78cce0"}}>(w)</span>, <span style={{color:"#78cce0"}}>(d)</span>, <span style={{color:"#78cce0"}}>(m)</span> for weekly, daily, monthly — so you always know what you're looking at. Squish on time → <span style={{color:"#ffcc30",fontWeight:"bold"}}>🔥 streak grows</span>. Miss the deadline → streak resets, shame intensifies. From the popup you can <span style={{color:"#d4a030",fontWeight:"bold"}}>⏸ pause</span> a whole series, <span style={{color:"#b2aaea",fontWeight:"bold"}}>⏭ skip</span> one occurrence without penalty, or delete the series entirely.
             </div>
 
             {/* ── Section 6: Saving ── */}
