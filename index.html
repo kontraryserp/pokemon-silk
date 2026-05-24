@@ -198,7 +198,7 @@ function pruneRecurringHp(hpMap, templates){
 }
 
 // ─── Static star field ────────────────────────────────────────────────────────
-function buildStarField(W, H){
+function buildStarField(W, H, mobile){
   const off = document.createElement("canvas");
   off.width=W; off.height=H;
   const ctx = off.getContext("2d");
@@ -234,7 +234,7 @@ function buildStarField(W, H){
   // Moon radius: capped to never be tiny on narrow screens, but also never large enough to reach the web
   // Moon is at (W*0.82, H*0.10), web center at (W*0.50, H*0.50) with radius min(W,H)*0.42
   // Distance between them is always > 40% of the screen — moon halo (mR*5) can never reach the web
-  const mX=Math.floor(W*0.82), mY=Math.floor(H*0.10);
+  const mX=Math.floor(W*0.82), mY=Math.floor(H*(mobile?0.17:0.10));
   const mR=Math.floor(Math.max(Math.min(W,H)*0.052, 22)); // floor of 22px prevents tiny moon
   const halo=ctx.createRadialGradient(mX,mY,mR*0.7,mX,mY,mR*5);
   halo.addColorStop(0,"rgba(248,242,200,0.18)"); halo.addColorStop(0.3,"rgba(235,228,185,0.08)");
@@ -772,7 +772,7 @@ function PokemonSilk(){
       const dpr=window.devicePixelRatio||1;
       canvas.width=canvas.offsetWidth*dpr; canvas.height=canvas.offsetHeight*dpr;
       ctx.scale(dpr,dpr);
-      starRef.current=buildStarField(canvas.offsetWidth,canvas.offsetHeight);
+      starRef.current=buildStarField(canvas.offsetWidth,canvas.offsetHeight, window.innerWidth<600);
       fliesRef.current=makeFireflies(canvas.offsetWidth,canvas.offsetHeight);
     };
     resize(); window.addEventListener("resize",resize);
@@ -1121,7 +1121,7 @@ function PokemonSilk(){
     const PAD=8, H=280; // popup card height (edit is now a centered modal, not here)
     const below=popup.y+36;
     const above=popup.y-H-8;
-    const headerH=50;
+    const headerH=isMobile?82:50;
     if(below+H>window.innerHeight-PAD && above>headerH) return above;
     return Math.max(headerH+PAD, Math.min(below, window.innerHeight-H-PAD));
   })():0;
@@ -1144,7 +1144,7 @@ function PokemonSilk(){
     </div>
   );
   const formStyle={
-    position:"absolute",top:50,left:"50%",transform:"translateX(-50%)",
+    position:"absolute",top:isMobile?82:50,left:"50%",transform:"translateX(-50%)",
     background:"rgba(5,4,22,0.97)", border:"1px solid rgba(98,90,164,0.30)",
     borderRadius:5, padding:"14px 16px", zIndex:20,
     boxShadow:"0 2px 28px rgba(0,0,0,0.86)",
@@ -1232,13 +1232,14 @@ function PokemonSilk(){
 
       <input ref={importRef} type="file" accept=".json" onChange={importData} style={{display:"none"}}/>
 
-      {/* ── Header — always single row ──────────────────────────────────────── */}
+      {/* ── Header ─────────────────────────────────────────────────────────── */}
       <div style={{position:"absolute",top:0,left:0,right:0,
         padding:"9px 14px",
-        display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,
+        display:"flex",alignItems:"center",justifyContent:"space-between",
+        flexWrap:"wrap",gap:"6px 12px",
         background:"linear-gradient(to bottom,rgba(3,2,16,0.96) 60%,transparent)"}}>
 
-        {/* Left: logo + title + status */}
+        {/* Left: logo + title + status (status hidden on narrow screens) */}
         <div style={{display:"flex",alignItems:"center",gap:9,flexShrink:0}}>
           <svg width="22" height="22" viewBox="0 0 22 22" style={{flexShrink:0,filter:"drop-shadow(0 0 3px rgba(195,245,240,0.35))"}}>
             <circle cx="11" cy="11" r="2.4" fill="rgba(210,255,248,0.98)"/>
@@ -1250,33 +1251,34 @@ function PokemonSilk(){
               <circle key={i} cx="11" cy="11" r={f*10} fill="none" stroke={`rgba(228,218,185,${0.18+i*0.09})`} strokeWidth="0.85"/>
             )}
           </svg>
-          <div style={{display:"flex",alignItems:"baseline",gap:8,flexWrap:"nowrap"}}>
+          <div style={{display:"flex",alignItems:"baseline",gap:8}}>
             <span style={{fontFamily:"monospace",fontSize:isMobile?13:15,color:"#e0d8ff",letterSpacing:2,fontWeight:"bold",whiteSpace:"nowrap",textShadow:"0 0 12px rgba(180,160,255,0.30)"}}>Pokémon Silk</span>
-            {!isMobile&&<span style={{fontSize:9,color:"rgba(200,195,255,0.60)",letterSpacing:1,fontFamily:"monospace",whiteSpace:"nowrap"}}>
+            {/* Status text — hidden on mobile, hidden via overflow on very narrow desktop */}
+            {!isMobile&&<span style={{fontSize:9,color:"rgba(200,195,255,0.60)",letterSpacing:1,fontFamily:"monospace",whiteSpace:"nowrap",overflow:"hidden",maxWidth:"clamp(0px, calc(100vw - 520px), 200px)"}}>
               {totalCount>0?`${totalCount} lurking`:"all clear"}
               {overdueCount>0&&<span style={{color:"rgba(255,110,85,0.92)",marginLeft:7}}>· {overdueCount} overdue</span>}
             </span>}
           </div>
         </div>
 
-        {/* Right: how to play + actions — all in one row, shrink gracefully */}
-        <div style={{display:"flex",gap:5,alignItems:"center",flexShrink:1,flexWrap:"nowrap"}}>
+        {/* Right: action buttons — wraps to second row if needed, that's fine */}
+        <div style={{display:"flex",gap:5,alignItems:"center",flexWrap:"wrap"}}>
           <button onClick={()=>setShowInfo(true)}
             style={{background:"rgba(90,75,165,0.30)",border:"1px solid rgba(145,130,220,0.52)",
               color:"rgba(205,195,255,0.92)",padding:"5px 10px",
               borderRadius:4,cursor:"pointer",
               fontSize:isMobile?9:10,fontFamily:"monospace",letterSpacing:0.5,
-              whiteSpace:"nowrap",fontWeight:"bold",flexShrink:0,
+              whiteSpace:"nowrap",fontWeight:"bold",
               boxShadow:"0 0 8px rgba(120,100,220,0.15)"}}>
-            ⓘ{!isMobile&&" How to play"}
+            ⓘ How to play
           </button>
           {overdueCount>0&&(
             <button onClick={()=>askConfirm(`Squish all ${overdueCount} overdue task${overdueCount>1?"s":""}?`,bulkSquishOverdue)}
               style={{background:"rgba(150,32,14,0.28)",border:"1px solid rgba(180,45,20,0.55)",
                 color:"rgba(255,130,100,0.96)",padding:"5px 9px",borderRadius:4,
                 cursor:"pointer",fontSize:isMobile?9:10,letterSpacing:0.5,fontFamily:"monospace",
-                fontWeight:"bold",whiteSpace:"nowrap",flexShrink:0}}>
-              💀{!isMobile&&" squish overdue"}
+                fontWeight:"bold",whiteSpace:"nowrap"}}>
+              💀 squish overdue
             </button>
           )}
           {[
@@ -1286,7 +1288,7 @@ function PokemonSilk(){
             <button key={label} onClick={onClick} title={title}
               style={{background:"rgba(45,68,135,0.28)",border:"1px solid rgba(70,105,185,0.45)",
                 color:"rgba(165,195,255,0.88)",padding:"5px 9px",borderRadius:4,
-                cursor:"pointer",fontSize:13,lineHeight:1,fontWeight:"bold",flexShrink:0}}>
+                cursor:"pointer",fontSize:13,lineHeight:1,fontWeight:"bold"}}>
               {label}
             </button>
           ))}
@@ -1310,7 +1312,7 @@ function PokemonSilk(){
 
       {/* ── Subtask panel ──────────────────────────────────────────────────── */}
       {activeProjObj&&(
-        <div style={{position:"absolute",top:50,left:10,
+        <div style={{position:"absolute",top:isMobile?82:50,left:10,
           background:"rgba(5,4,22,0.96)",border:"1px solid rgba(82,118,192,0.34)",
           borderRadius:6,padding:"10px 12px",zIndex:25,
           maxWidth:isMobile?"calc(100vw - 20px)":"54%",
