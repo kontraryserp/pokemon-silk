@@ -1608,13 +1608,13 @@ function PokemonSilk(){
 
             {/* Opening */}
             <div style={{fontFamily:"monospace",fontSize:10,color:"rgba(215,210,255,0.92)",lineHeight:1.95,marginBottom:22,padding:"14px 16px",background:"rgba(80,60,180,0.13)",borderRadius:7,border:"1px solid rgba(120,100,210,0.24)"}}>
-              A <span style={{color:"#c8beff",fontWeight:"bold"}}>visual to-do list</span> where your tasks become spider Pokémon crawling toward the center of a glowing web — the closer to the center, the sooner the deadline. Tasks have <span style={{color:"#e8c840",fontWeight:"bold"}}>health points</span> and take multiple hits to clear. Big multi-step work spawns as <span style={{color:"#f0a060",fontWeight:"bold"}}>evolved boss Pokémon</span> with subtasks. <span style={{color:"#78cce0",fontWeight:"bold"}}>Recurring tasks</span> auto-schedule and track your 🔥 streak. Miss a deadline and your spider goes <span style={{color:"#ff7060",fontWeight:"bold"}}>OVERDUE</span> — parked at the center, pulsing red, judging you. Everything auto-saves to your browser. No account. No cloud. Just you, the web, and your rapidly approaching deadlines.
+              A <span style={{color:"#e8c840",fontWeight:"bold"}}>visual to-do list</span> where your tasks become spider Pokémon crawling toward the center of a glowing web — the closer to the center, the faster they're accelerating toward your deadline. Tasks can have <span style={{color:"#e8c840",fontWeight:"bold"}}>health bars</span> which take multiple hits, and large projects spawn as <span style={{color:"#f0a060",fontWeight:"bold"}}>evolved boss Pokémon</span> with subtasks. <span style={{color:"#78cce0",fontWeight:"bold"}}>Recurring tasks</span> auto-schedule and track your 🔥 streak. Miss a deadline and your spider goes <span style={{color:"#ff7060",fontWeight:"bold"}}>overdue</span> — parked at the center, pulsing red. Everything auto-saves to your browser. No account. No cloud. Just you, the web, and your spiders.
             </div>
 
             {/* Section 1: The Web */}
             <div style={{fontFamily:"monospace",fontSize:9,color:"rgba(120,204,224,0.75)",letterSpacing:1.5,marginBottom:10}}>① THE WEB — YOUR ANXIETY, VISUALISED</div>
             <div style={{fontFamily:"monospace",fontSize:9,color:"rgba(205,200,255,0.78)",lineHeight:1.85,marginBottom:10}}>
-              Three faint dashed rings divide the web into <span style={{color:"#78cce0",fontWeight:"bold"}}>deadline zones</span>. Spiders spawn at the outer edge and creep inward. The closer to the center, the sooner the deadline:
+              Three faint dashed rings divide the web into <span style={{color:"#78cce0",fontWeight:"bold"}}>deadline zones</span>. Spiders spawn at the outer edge and creep inward, accelerating as they approach the center:
             </div>
             <div style={{display:"flex",gap:8,marginBottom:10,flexWrap:"wrap"}}>
               {[
@@ -1630,7 +1630,7 @@ function PokemonSilk(){
               ))}
             </div>
             <div style={{fontFamily:"monospace",fontSize:9,color:"rgba(205,200,255,0.78)",lineHeight:1.85,marginBottom:20}}>
-              Inside that final 24-hour ring, things accelerate sharply. Anything that reaches the center goes <span style={{color:"#ff7060",fontWeight:"bold"}}>OVERDUE</span> and stays there until you deal with it. If several pile up, the <span style={{color:"rgba(255,130,100,0.95)",fontWeight:"bold"}}>💀 squish overdue</span> button in the header clears them all at once.
+              Inside that final 24-hour ring, things accelerate sharply. Anything that reaches the center goes <span style={{color:"#ff7060",fontWeight:"bold"}}>overdue</span> and stays there until you deal with it. If several pile up, the <span style={{color:"rgba(255,130,100,0.95)",fontWeight:"bold"}}>💀 squish overdue</span> button in the header clears them all at once.
             </div>
 
             {/* Section 2: The Pokémon */}
@@ -1677,19 +1677,19 @@ function PokemonSilk(){
             {/* Section 3: Tasks */}
             <div style={{fontFamily:"monospace",fontSize:9,color:"rgba(168,216,104,0.75)",letterSpacing:1.5,marginBottom:10}}>③ ADDING TASKS</div>
             <div style={{fontFamily:"monospace",fontSize:9,color:"rgba(205,200,255,0.78)",lineHeight:1.85,marginBottom:20}}>
-              Hit <span style={{color:"#b2aaea",fontWeight:"bold"}}>+ task</span>, name it, pick a creature, set a deadline. Optional: give it <span style={{color:"#f0c080",fontWeight:"bold"}}>health (1–5)</span> so it takes multiple hits to clear — great for tasks that need several sessions rather than one sitting. Add a <span style={{color:"#b2aaea",fontWeight:"bold"}}>note</span> if you need context later. Hit <span style={{color:"#b2aaea",fontWeight:"bold"}}>spawn →</span> and watch it appear on the web. <span style={{color:"#e8c840",fontWeight:"bold"}}>Tap any spider</span> to open its options: squish it, deal –1 HP, edit it, or remove it entirely.
+              Hit <span style={{color:"#e8c840",fontWeight:"bold"}}>+ task</span>, name it, pick a creature, set a deadline. Optional: give it <span style={{color:"#f0c080",fontWeight:"bold"}}>health (1–5)</span> so it takes multiple hits to clear — great for tasks that need several sessions rather than one sitting. Add a <span style={{color:"#e8c840",fontWeight:"bold"}}>note</span> if you need context later. Hit <span style={{color:"#e8c840",fontWeight:"bold"}}>spawn →</span> and watch it appear on the web. <span style={{color:"#e8c840",fontWeight:"bold"}}>Tap any spider</span> to open its options: squish it, deal –1 HP, edit it, or remove it entirely.
             </div>
 
             {/* Section 4: Projects */}
             <div style={{fontFamily:"monospace",fontSize:9,color:"rgba(255,160,100,0.75)",letterSpacing:1.5,marginBottom:10}}>④ PROJECTS — BOSS FIGHTS</div>
             <div style={{fontFamily:"monospace",fontSize:9,color:"rgba(205,200,255,0.78)",lineHeight:1.85,marginBottom:20}}>
-              Hit <span style={{color:"#92bcec",fontWeight:"bold"}}>+ project</span> for anything multi-step. Pick a boss, add subtasks with their own HP bars, set a deadline. The boss's HP on the web is the sum of all subtasks — tap it to open the subtask panel and chip away. When every subtask reaches zero, <span style={{color:"#d26858",fontWeight:"bold"}}>💥 squish boss</span> unlocks. The explosion is proportional to how long it took you.
+              Hit <span style={{color:"#e8c840",fontWeight:"bold"}}>+ project</span> for anything multi-step. Pick a boss, add subtasks with their own HP bars, set a deadline. The boss's HP on the web is the sum of all subtasks — tap it to open the subtask panel and chip away. When every subtask reaches zero, <span style={{color:"#d26858",fontWeight:"bold"}}>💥 squish boss</span> unlocks. The explosion is proportional to how long it took you.
             </div>
 
             {/* Section 5: Recurring */}
             <div style={{fontFamily:"monospace",fontSize:9,color:"rgba(120,204,224,0.75)",letterSpacing:1.5,marginBottom:10}}>⑤ RECURRING TASKS</div>
             <div style={{fontFamily:"monospace",fontSize:9,color:"rgba(205,200,255,0.78)",lineHeight:1.85,marginBottom:20}}>
-              Tick <span style={{color:"#78cce0",fontWeight:"bold"}}>Recurring</span> when creating a task. Set a frequency — daily <span style={{color:"#78cce0"}}>(d)</span>, weekly <span style={{color:"#78cce0"}}>(w)</span>, or monthly <span style={{color:"#78cce0"}}>(m)</span> — and how many times, or ∞ for things that never end (gym, laundry, that one meeting). The next 3 unsquished instances always live on the web, including overdue ones. Squish on time to build your <span style={{color:"#ffcc30",fontWeight:"bold"}}>🔥 streak</span>. Miss one and it resets. From the popup you can <span style={{color:"#d4a030",fontWeight:"bold"}}>⏸ pause</span> the whole series, <span style={{color:"#b2aaea",fontWeight:"bold"}}>⏭ skip</span> one occurrence without penalty, or remove it entirely.
+              Tick <span style={{color:"#78cce0",fontWeight:"bold"}}>Recurring</span> when creating a task. Set a frequency — daily <span style={{color:"#78cce0"}}>(d)</span>, weekly <span style={{color:"#78cce0"}}>(w)</span>, or monthly <span style={{color:"#78cce0"}}>(m)</span> — and how many times, or ∞ for things that never end (gym, laundry, that one meeting). The next 3 unsquished instances always live on the web, including overdue ones. Squish on time to build your <span style={{color:"#ffcc30",fontWeight:"bold"}}>🔥 streak</span>. Miss one and it resets. From the popup you can <span style={{color:"#d4a030",fontWeight:"bold"}}>⏸ pause</span> the whole series, <span style={{color:"#e8c840",fontWeight:"bold"}}>⏭ skip</span> one occurrence without penalty, or remove it entirely.
             </div>
 
             {/* Section 6: Saving */}
