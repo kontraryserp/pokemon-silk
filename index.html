@@ -114,7 +114,7 @@ function overduePos(ent, allEntities, cx, cy, now){
   const spread = Math.min(18, count * 4);
   return { x: cx + Math.cos(angle) * spread, y: cy + Math.sin(angle) * spread };
 }
-const MAX_RECURRING_SHOWN = 3; // max instances shown per series at once
+const MAX_RECURRING_SHOWN = 2; // max instances shown per series at once
 
 function expandRecurring(tmpl, now, hpMap, streakMap, existingAngles){
   if(tmpl.paused) return [];
@@ -135,16 +135,23 @@ function expandRecurring(tmpl, now, hpMap, streakMap, existingAngles){
     const hp  = hpMap[key] ?? tmpl.maxHp;
     if(hp<=0) continue;
 
-    // Pick best of 16 evenly-spaced candidates to maximise distance from usedAngles
+    // Pick best of 16 evenly-spaced candidates, weighted by deadline proximity
+    const nowMs = Date.now();
     let bestAngleVal=rawAngle, bestDist=-1;
     for(let c=0;c<16;c++){
       const cand=(rawAngle+c*(Math.PI*2/16))%(Math.PI*2);
-      const minDist=usedAngles.length===0 ? Math.PI*2
-        : usedAngles.reduce((mn,a)=>{const d=Math.abs(cand-a);return Math.min(mn,d,Math.PI*2-d);},Math.PI*2);
-      if(minDist>bestDist){bestDist=minDist;bestAngleVal=cand;}
+      let score=Math.PI*2;
+      for(const entry of usedAngles){
+        const [a, dl] = Array.isArray(entry) ? entry : [entry, 0];
+        const angDist=Math.min(Math.abs(cand-a),Math.PI*2-Math.abs(cand-a));
+        const myR=getRadius(deadline,nowMs,1000), theirR=getRadius(dl||0,nowMs,1000);
+        const weight=Math.abs(myR-theirR)<150?1.6:1.0;
+        score=Math.min(score,angDist*weight);
+      }
+      if(score>bestDist){bestDist=score;bestAngleVal=cand;}
     }
     const angle=(bestAngleVal+jitter+Math.PI*2)%(Math.PI*2);
-    usedAngles.push(angle);
+    usedAngles.push([angle, deadline]); // store as [angle, deadline] pair
 
     instances.push({id:key, name:`${tmpl.name} ${suffix}`, deadline, type:tmpl.type,
       maxHp:tmpl.maxHp, hp, angle, isRecurring:true,
@@ -553,12 +560,12 @@ function PokemonSilk(){
   // Expand recurring
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const recurringInstances=useMemo(()=>{
-    // Seed with all regular task/project angles so recurring instances avoid them
-    const baseAngles=[...tasks.map(t=>t.angle),...projects.map(p=>p.angle)];
+    // Seed with all regular task/project [angle,deadline] pairs so recurring instances avoid them
+    const baseAngles=[...tasks.map(t=>[t.angle,t.deadline]),...projects.map(p=>[p.angle,p.deadline])];
     const allInstances=[];
     for(const tmpl of recurringTemplates){
-      // Pass angles already used (base + previously placed recurring) so series spread apart
-      const usedSoFar=[...baseAngles,...allInstances.map(i=>i.angle)];
+      // Pass [angle,deadline] pairs already used so series spread apart with deadline awareness
+      const usedSoFar=[...baseAngles,...allInstances.map(i=>[i.angle,i.deadline])];
       const inst=expandRecurring(tmpl,Date.now(),recurringHp,streaks,usedSoFar);
       allInstances.push(...inst);
     }
@@ -599,28 +606,35 @@ function PokemonSilk(){
   };
 
   // ── Smart angle assignment ─────────────────────────────────────────────────
-  // Pick the angle that maximises the minimum angular distance from all existing entities
-  const bestAngle = useCallback((existingAngles) => {
+  // Pick angle maximising min angular distance from existing entities,
+  // weighted by deadline proximity (similar deadlines need more angular separation)
+  const bestAngle = useCallback((existingAngles, deadline) => {
     if(existingAngles.length === 0) return Math.random() * Math.PI * 2;
-    const CANDIDATES = 32; // test this many evenly-spaced candidates
-    let best = 0, bestDist = -1;
+    const now = Date.now();
+    const CANDIDATES = 32;
+    let best = 0, bestScore = -1;
     for(let i = 0; i < CANDIDATES; i++){
       const candidate = (i / CANDIDATES) * Math.PI * 2;
-      // Minimum angular distance to any existing angle
-      const minDist = existingAngles.reduce((min, a) => {
-        const d = Math.abs(candidate - a);
-        return Math.min(min, d, Math.PI * 2 - d); // wrap-around distance
-      }, Math.PI * 2);
-      if(minDist > bestDist){ bestDist = minDist; best = candidate; }
+      let score = Math.PI * 2; // will be minimised across existing angles
+      for(const [a, dl] of existingAngles){
+        const angDist = Math.min(Math.abs(candidate-a), Math.PI*2-Math.abs(candidate-a));
+        // Boost required separation for tasks with similar deadlines (same ring area)
+        const myRadius = getRadius(deadline, now, 1000);
+        const theirRadius = getRadius(dl, now, 1000);
+        const radiusDiff = Math.abs(myRadius - theirRadius);
+        // If radii are within 15% of maxR, demand more angular separation
+        const weight = radiusDiff < 150 ? 1.6 : 1.0;
+        score = Math.min(score, angDist * weight);
+      }
+      if(score > bestScore){ bestScore = score; best = candidate; }
     }
-    // Add a tiny random jitter so two tasks added at the same time don't land identically
     return best + (Math.random() - 0.5) * 0.15;
   }, []);
 
   const allAngles = useCallback(() => [
-    ...tasks.map(t => t.angle),
-    ...projects.map(p => p.angle),
-    ...recurringInstances.map(i => i.angle),
+    ...tasks.map(t => [t.angle, t.deadline]),
+    ...projects.map(p => [p.angle, p.deadline]),
+    ...recurringInstances.map(i => [i.angle, i.deadline]),
   ], [tasks, projects, recurringInstances]);
 
   // ── Add task ───────────────────────────────────────────────────────────────
@@ -635,7 +649,7 @@ function PokemonSilk(){
     } else {
       const id=`t_${Date.now()}`; spawnTimeRef.current[id]=Date.now();
       setTasks(prev=>[...prev,{id, name:nName.trim(), deadline, type:nType,
-        angle:bestAngle(allAngles()), maxHp:nHp, hp:nHp, note:nNote.trim()}]);
+        angle:bestAngle(allAngles(), deadline), maxHp:nHp, hp:nHp, note:nNote.trim()}]);
     }
     setNName(""); setNDate(""); setNTime("23:59"); setNHp(1); setNNote("");
     setNRecurring(false); setNFreq("weekly"); setNCount("infinite"); setShowForm(null);
@@ -648,7 +662,7 @@ function PokemonSilk(){
     const deadline=new Date(`${pDate}T${pTime||"23:59"}`).getTime(); if(isNaN(deadline)) return;
     const id=`p_${Date.now()}`; spawnTimeRef.current[id]=Date.now();
     setProjects(prev=>[...prev,{id, name:pName.trim(), deadline, type:pType,
-      angle:bestAngle(allAngles()),
+      angle:bestAngle(allAngles(), deadline),
       subtasks:valid.map(s=>({id:`st_${Date.now()}_${Math.random()}`,name:s.name.trim(),maxHp:s.maxHp,hp:s.maxHp}))}]);
     setPName(""); setPDate(""); setPTime("23:59"); setPType("ariados"); setPSubtasks([{name:"",maxHp:1}]); setShowForm(null);
   },[pName,pDate,pTime,pType,pSubtasks,bestAngle,allAngles]);
@@ -699,10 +713,10 @@ function PokemonSilk(){
   // ── Export / Import ────────────────────────────────────────────────────────
   const importRef=useRef(null);
   const exportData=useCallback(()=>{
-    const data={tasks,projects,recurringTemplates,recurringHp,streaks,exportedAt:new Date().toISOString(),version:3};
+    const data={tasks,projects,recurringTemplates,recurringHp,streaks,exportedAt:new Date().toISOString(),version:4};
     const blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json"});
     const url=URL.createObjectURL(blob);
-    const a=document.createElement("a"); a.href=url; a.download="pokemon-silk-v3-backup.json"; a.click();
+    const a=document.createElement("a"); a.href=url; a.download="pokemon-silk-v4-backup.json"; a.click();
     URL.revokeObjectURL(url);
   },[tasks,projects,recurringTemplates,recurringHp,streaks]);
 
@@ -770,8 +784,7 @@ function PokemonSilk(){
     }
 
     setPopup(null);
-
-    // Click on web (within maxR) — ripple from click point
+    setActiveProj(null);
     if(distToCenter<=maxR){
       webRipples.current.push({x:mx, y:my, r:Math.min(maxR, distToCenter+60), age:0, life:1.4});
     }
@@ -1044,29 +1057,29 @@ function PokemonSilk(){
         const raw=ent.name.length>14?ent.name.slice(0,13)+"…":ent.name;
         const cd=overdue?"OVERDUE":formatCountdown(ms);
         const hpTxt=isProj?`${projectCurrentHp(ent)}/${projectMaxHp(ent)} HP`:null;
-        const th=hpTxt?38:27;
-        const lx2=sx+Math.cos(ent.angle+angleOff)*(sz*0.52+th*0.5+8);
-        const ly2=sy+Math.sin(ent.angle+angleOff)*(sz*0.52+th*0.5+8)+bob;
-        ctx.save();ctx.globalAlpha=fadeIn;ctx.font="bold 11px monospace";ctx.textAlign="center";
-        const tw=Math.max(ctx.measureText(raw).width,ctx.measureText(cd).width,hpTxt?ctx.measureText(hpTxt).width:0)+18;
+        const th=hpTxt?33:24;
+        const lx2=sx+Math.cos(ent.angle+angleOff)*(sz*0.52+th*0.5+6);
+        const ly2=sy+Math.sin(ent.angle+angleOff)*(sz*0.52+th*0.5+6)+bob;
+        ctx.save();ctx.globalAlpha=fadeIn;ctx.font="bold 10px monospace";ctx.textAlign="center";
+        const tw=Math.max(ctx.measureText(raw).width,ctx.measureText(cd).width,hpTxt?ctx.measureText(hpTxt).width:0)+4;
         // Pill background: species tint unless selected/overdue
         ctx.fillStyle=isSel?"rgba(22,14,4,0.96)":overdue?"rgba(28,4,4,0.92)":scol.pill;
         ctx.beginPath();ctx.roundRect(lx2-tw/2,ly2-th/2,tw,th,3);ctx.fill();
         ctx.strokeStyle=isSel?"rgba(255,218,60,0.65)":overdue?"rgba(255,80,60,0.40)":scol.border;
         ctx.lineWidth=0.8;ctx.stroke();
         ctx.fillStyle=isSel?"#ffe050":overdue?"#ff7060":scol.text;
-        ctx.fillText(raw,lx2,ly2-(hpTxt?11:2));
-        ctx.font="10px monospace";
+        ctx.fillText(raw,lx2,ly2-(hpTxt?9:2));
+        ctx.font="9px monospace";
         ctx.fillStyle=isSel?"#ffbe1a":overdue?"rgba(255,130,100,0.90)":"rgba(210,206,246,0.82)";
-        ctx.fillText(cd,lx2,ly2+(hpTxt?1:10));
-        if(hpTxt){ctx.font="9px monospace";ctx.fillStyle=isSel?"rgba(255,202,82,0.94)":"rgba(152,192,255,0.70)";ctx.fillText(hpTxt,lx2,ly2+13);}
+        ctx.fillText(cd,lx2,ly2+(hpTxt?1:9));
+        if(hpTxt){ctx.font="8px monospace";ctx.fillStyle=isSel?"rgba(255,202,82,0.94)":"rgba(152,192,255,0.70)";ctx.fillText(hpTxt,lx2,ly2+11);}
         ctx.restore();
 
-        // HP bar
+        // HP bar — tighter gap to label (hpTxt?6:4 instead of 15:4)
         const mhp2=isProj?projectMaxHp(ent):(ent.maxHp??1);
         const chp2=isProj?projectCurrentHp(ent):(ent.hp??ent.maxHp??1);
         if(mhp2>1){
-          const barW=Math.max(tw,50),barH=5,barX=lx2-barW/2,barY=ly2+th/2+(hpTxt?15:4);
+          const barW=Math.max(tw,50),barH=5,barX=lx2-barW/2,barY=ly2+th/2+(hpTxt?6:4);
           const filled=Math.max(0,Math.min(mhp2,Math.round(chp2)));
           const ratio=filled/mhp2;
           const hr2=Math.round(220-ratio*140),hg2=Math.round(60+ratio*160);
@@ -1249,7 +1262,7 @@ function PokemonSilk(){
           })}
         </div>
       )}
-      {popup&&!editItem&&<div onClick={()=>setPopup(null)} style={{position:"fixed",inset:0,zIndex:28,background:"transparent"}}/>}
+      {popup&&!editItem&&<div onClick={()=>{setPopup(null);setActiveProj(null);}} style={{position:"fixed",inset:0,zIndex:28,background:"transparent"}}/>}
 
       {confirm&&<ConfirmDialog message={confirm.message}
         onConfirm={()=>{confirm.onConfirm();setConfirm(null);}}
@@ -1531,7 +1544,10 @@ function PokemonSilk(){
       )}
 
       {/* ── Edit modal — centered, always fully visible, explicit close only ── */}
-      {editItem&&(
+      {editItem&&(()=>{
+        // Use a callback ref so focus fires only once when the input mounts, not on every re-render
+        const focusOnMount = el => { if(el) el.focus(); };
+        return(
         <div style={{position:"fixed",inset:0,zIndex:32,display:"flex",alignItems:"center",justifyContent:"center",background:"rgba(0,0,0,0.45)"}}>
           <div onClick={e=>e.stopPropagation()} style={{
             background:"rgba(5,4,22,0.98)", border:"1px solid rgba(112,104,178,0.34)",
@@ -1543,7 +1559,7 @@ function PokemonSilk(){
           <div style={{fontFamily:"monospace",fontSize:8,color:"rgba(158,150,218,0.42)",marginBottom:10,letterSpacing:2}}>
             EDIT {editItem.kind==="task"?"TASK":editItem.kind==="recurring"?"RECURRING SERIES":"PROJECT"}
           </div>
-          <Field label="NAME"><input autoFocus value={editItem.name} onChange={e=>setEditItem(t=>({...t,name:e.target.value}))} style={INP({width:"100%",boxSizing:"border-box"})}/></Field>
+          <Field label="NAME"><input ref={focusOnMount} value={editItem.name} onChange={e=>setEditItem(t=>({...t,name:e.target.value}))} style={INP({width:"100%",boxSizing:"border-box"})}/></Field>
           {editItem.kind!=="project"&&<Field label="CREATURE"><select value={editItem.type} onChange={e=>setEditItem(t=>({...t,type:e.target.value}))} style={INP({width:"100%",boxSizing:"border-box"})}>{Object.entries(SPECIES).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}</select></Field>}
           {editItem.kind==="project"&&<Field label="BOSS"><select value={editItem.type} onChange={e=>setEditItem(t=>({...t,type:e.target.value}))} style={INP({width:"100%",boxSizing:"border-box"})}>{Object.keys(BOSS_SPECIES).map(k=><option key={k} value={k}>{bossLabel(k)}</option>)}</select></Field>}
           {editItem.kind==="recurring"&&<>
@@ -1580,7 +1596,8 @@ function PokemonSilk(){
           </div>
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {/* ── Info overlay ────────────────────────────────────────────────────── */}
       {showInfo&&(
@@ -1604,7 +1621,7 @@ function PokemonSilk(){
               </div>
               <button onClick={()=>setShowInfo(false)} style={{background:"transparent",border:"none",color:"rgba(160,152,220,0.45)",cursor:"pointer",fontSize:18,lineHeight:1,padding:"0 2px"}}>✕</button>
             </div>
-            <div style={{fontFamily:"monospace",fontSize:9,color:"rgba(180,172,240,0.45)",marginBottom:18,letterSpacing:1}}>v3 · fan project by Aditya Koneru</div>
+            <div style={{fontFamily:"monospace",fontSize:9,color:"rgba(180,172,240,0.45)",marginBottom:18,letterSpacing:1}}>v4 · fan project by Aditya Koneru</div>
 
             {/* Opening */}
             <div style={{fontFamily:"monospace",fontSize:10,color:"rgba(215,210,255,0.92)",lineHeight:1.95,marginBottom:22,padding:"14px 16px",background:"rgba(80,60,180,0.13)",borderRadius:7,border:"1px solid rgba(120,100,210,0.24)"}}>
@@ -1689,7 +1706,7 @@ function PokemonSilk(){
             {/* Section 5: Recurring */}
             <div style={{fontFamily:"monospace",fontSize:9,color:"rgba(120,204,224,0.75)",letterSpacing:1.5,marginBottom:10}}>⑤ RECURRING TASKS</div>
             <div style={{fontFamily:"monospace",fontSize:9,color:"rgba(205,200,255,0.78)",lineHeight:1.85,marginBottom:20}}>
-              Tick <span style={{color:"#78cce0",fontWeight:"bold"}}>Recurring</span> when creating a task. Set a frequency — daily <span style={{color:"#78cce0"}}>(d)</span>, weekly <span style={{color:"#78cce0"}}>(w)</span>, or monthly <span style={{color:"#78cce0"}}>(m)</span> — and how many times, or ∞ for things that never end (gym, laundry, that one meeting). The next 3 unsquished instances always live on the web, including overdue ones. Squish on time to build your <span style={{color:"#ffcc30",fontWeight:"bold"}}>🔥 streak</span>. Miss one and it resets. From the popup you can <span style={{color:"#d4a030",fontWeight:"bold"}}>⏸ pause</span> the whole series, <span style={{color:"#e8c840",fontWeight:"bold"}}>⏭ skip</span> one occurrence without penalty, or remove it entirely.
+              Tick <span style={{color:"#78cce0",fontWeight:"bold"}}>Recurring</span> when creating a task. Set a frequency — daily <span style={{color:"#78cce0"}}>(d)</span>, weekly <span style={{color:"#78cce0"}}>(w)</span>, or monthly <span style={{color:"#78cce0"}}>(m)</span> — and how many times, or ∞ for things that never end (gym, laundry, that one meeting). The next 2 unsquished instances always live on the web, including overdue ones. Squish on time to build your <span style={{color:"#ffcc30",fontWeight:"bold"}}>🔥 streak</span>. Miss one and it resets. From the popup you can <span style={{color:"#d4a030",fontWeight:"bold"}}>⏸ pause</span> the whole series, <span style={{color:"#e8c840",fontWeight:"bold"}}>⏭ skip</span> one occurrence without penalty, or remove it entirely.
             </div>
 
             {/* Section 6: Saving */}
@@ -1724,7 +1741,7 @@ function PokemonSilk(){
       {/* ── Credits — hidden on mobile (visible in info panel instead) ───────── */}
       {!isMobile&&<div style={{position:"absolute",bottom:8,right:12,textAlign:"right",fontFamily:"monospace",lineHeight:1.7}}>
         <div style={{fontSize:8,color:"rgba(198,192,252,0.52)",letterSpacing:0.5}}>
-          Pokémon Silk v3 · a fan project by <span style={{color:"rgba(218,212,255,0.72)"}}>Aditya Koneru</span>
+          Pokémon Silk v4 · a fan project by <span style={{color:"rgba(218,212,255,0.72)"}}>Aditya Koneru</span>
         </div>
         <div style={{fontSize:7,color:"rgba(158,152,222,0.32)",letterSpacing:0.4}}>
           Pokémon & sprites © Nintendo / Game Freak · not affiliated
