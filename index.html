@@ -128,9 +128,9 @@ function expandRecurring(tmpl, now, hpMap, streakMap, existingAngles){
 
   for(let i=0; i<maxCount; i++){
     const deadline = tmpl.startDeadline + i*stepMs;
-    // Pre-consume two RNG values (raw angle + jitter) for deterministic stability
+    // Seeded angle — stable across reloads, best-angle selection spreads instances
     const rawAngle = (rng()*Math.PI*2 + i*2.399) % (Math.PI*2);
-    const jitter   = (rng()-0.5)*0.12;
+    const jitter   = (rng()-0.5)*0.10;
     const key = `${tmpl.id}:${i}`;
     const hp  = hpMap[key] ?? tmpl.maxHp;
     if(hp<=0) continue;
@@ -604,6 +604,32 @@ function PokemonSilk(){
     const pos=isOD?overduePos(ent,allEnts,cx,cy,now):{x:cx+Math.cos(ent.angle)*r,y:cy+Math.sin(ent.angle)*r};
     stateRef.current.particles=[...(stateRef.current.particles||[]),...spawnSquish(pos.x,pos.y,type)];
   };
+
+  // ── Nudge — reassign angle to most open position given current web state ───
+  const nudgeEntity=useCallback((id, kind)=>{
+    // Build all angles EXCLUDING the entity being nudged
+    const otherAngles=[
+      ...tasks.filter(t=>t.id!==id).map(t=>[t.angle,t.deadline]),
+      ...projects.filter(p=>p.id!==id).map(p=>[p.angle,p.deadline]),
+      ...recurringInstances.filter(i=>i.id!==id).map(i=>[i.angle,i.deadline]),
+    ];
+    if(kind==="task"){
+      const t=tasks.find(t=>t.id===id); if(!t) return;
+      const newAngle=bestAngle(otherAngles, t.deadline);
+      setTasks(prev=>prev.map(x=>x.id===id?{...x,angle:newAngle}:x));
+    } else if(kind==="project"){
+      const p=projects.find(p=>p.id===id); if(!p) return;
+      const newAngle=bestAngle(otherAngles, p.deadline);
+      setProjects(prev=>prev.map(x=>x.id===id?{...x,angle:newAngle}:x));
+    } else if(kind==="recurring"){
+      // For recurring instances, nudge the template's startDeadline angle isn't stored —
+      // recurring angles are computed dynamically. Force a tick refresh so expandRecurring
+      // re-runs with fresh random candidates by temporarily clearing and re-setting the template.
+      // Instead, we just re-run the memo by bumping tick — the best-angle algo will re-spread.
+      setTick(t=>t+1);
+    }
+    setPopup(null);
+  },[tasks,projects,recurringInstances,bestAngle]);
 
   // ── Smart angle assignment ─────────────────────────────────────────────────
   // Pick angle maximising min angular distance from existing entities,
@@ -1486,6 +1512,7 @@ function PokemonSilk(){
             <button onClick={()=>{const d=new Date(selTask.deadline);setEditItem({kind:"task",...selTask,date:d.toISOString().split("T")[0],time:`${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`,maxHp:selTask.maxHp??1,hp:selTask.hp??selTask.maxHp??1,note:selTask.note??"",});}} style={{...BTN("primary"),flex:1}}>✎ edit</button>
             <button onClick={()=>{const cur=selTask.hp??selTask.maxHp??1,nx=cur-1;squishAt(selTask.id,selTask.type,false);if(nx<=0)removeTask(selTask.id);else{setTasks(p=>p.map(t=>t.id===selTask.id?{...t,hp:nx}:t));setPopup(null);}}} style={{...BTN("danger"),flex:1}}>{(selTask.hp??selTask.maxHp??1)>1?"✕ -1 hp":"✕ squish"}</button>
           </div>
+          <button onClick={()=>nudgeEntity(selTask.id,"task")} style={{...BTN("neutral"),width:"100%",marginBottom:6,fontSize:9}}>↻ nudge to open spot</button>
           <button onClick={()=>askConfirm("Remove this task permanently?",()=>removeTask(selTask.id))} style={{...BTN("danger"),width:"100%",marginBottom:4,fontSize:9}}>🗑 remove task</button>
           <button onClick={()=>setPopup(null)} style={{width:"100%",background:"transparent",border:"none",color:"rgba(132,124,192,0.30)",cursor:"pointer",fontSize:9,fontFamily:"monospace"}}>dismiss</button>
         </PopCard>
@@ -1521,6 +1548,7 @@ function PokemonSilk(){
             setRecurringHp(p=>({...p,[key]:0}));
             cleanupRefs(selRecI.id); setPopup(null);
           })} style={{...BTN("neutral"),width:"100%",marginBottom:6,fontSize:9}}>⏭ skip this occurrence</button>
+          <button onClick={()=>nudgeEntity(selRecI.id,"recurring")} style={{...BTN("neutral"),width:"100%",marginBottom:6,fontSize:9}}>↻ nudge to open spot</button>
           <button onClick={()=>askConfirm("Remove this entire recurring series?",()=>removeRecurringSeries(selRecT.id))} style={{...BTN("danger"),width:"100%",marginBottom:4,fontSize:9}}>🗑 remove entire series</button>
           <button onClick={()=>setPopup(null)} style={{width:"100%",background:"transparent",border:"none",color:"rgba(132,124,192,0.30)",cursor:"pointer",fontSize:9,fontFamily:"monospace"}}>dismiss</button>
         </PopCard>
@@ -1538,6 +1566,7 @@ function PokemonSilk(){
             <button onClick={()=>{const d=new Date(selProj.deadline);setEditItem({kind:"project",...selProj,date:d.toISOString().split("T")[0],time:`${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`,});}} style={{...BTN("primary"),flex:1}}>✎ edit</button>
             {projectAllDead(selProj)&&<button onClick={()=>{squishAt(selProj.id,selProj.type,true);removeProject(selProj.id);}} style={{...BTN("danger"),flex:1}}>💥 squish boss</button>}
           </div>
+          <button onClick={()=>nudgeEntity(selProj.id,"project")} style={{...BTN("neutral"),width:"100%",marginBottom:6,fontSize:9}}>↻ nudge to open spot</button>
           <button onClick={()=>askConfirm("Remove this project permanently?",()=>removeProject(selProj.id))} style={{...BTN("danger"),width:"100%",marginBottom:4,fontSize:9}}>🗑 remove project</button>
           <button onClick={()=>setPopup(null)} style={{width:"100%",background:"transparent",border:"none",color:"rgba(132,124,192,0.30)",cursor:"pointer",fontSize:9,fontFamily:"monospace"}}>dismiss</button>
         </PopCard>
